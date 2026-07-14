@@ -6,6 +6,7 @@
 <title>Recensement Bingerville — Carte de suivi terrain</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     --vert: #1B5E20;
@@ -110,40 +111,53 @@ const STATUS_COLOR = {
   'NON DEFINI': '#95a5a6'
 };
 
-const STORAGE_KEY = 'visited_points_v1';
+const SUPABASE_URL = 'https://xqfdhgrdvsdngfgiuomk.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_8Vyba1dTaQDTx1EuDz9naQ__fvezy3N';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
 let visited = {};
 
 async function loadVisited() {
   try {
-    const res = await window.storage.get(STORAGE_KEY, true);
-    if (res && res.value) {
-      visited = JSON.parse(res.value);
-    }
+    const { data, error } = await supabase.from('visites').select('point_id, visited_at, visited_by');
+    if (error) throw error;
+    visited = {};
+    (data || []).forEach(row => {
+      visited[row.point_id] = { at: row.visited_at, by: row.visited_by || '' };
+    });
   } catch (e) {
+    console.error('Erreur chargement Supabase', e);
     visited = {};
   }
 }
 
-async function saveVisited() {
+async function markVisited(id, who) {
+  const record = { at: new Date().toISOString(), by: who || '' };
+  visited[id] = record;
   try {
-    await window.storage.set(STORAGE_KEY, JSON.stringify(visited), true);
+    const { error } = await supabase.from('visites').upsert({
+      point_id: id,
+      visited_at: record.at,
+      visited_by: record.by
+    });
+    if (error) throw error;
   } catch (e) {
-    console.error('Erreur sauvegarde', e);
+    console.error('Erreur sauvegarde Supabase', e);
+  }
+}
+
+async function unmarkVisited(id) {
+  delete visited[id];
+  try {
+    const { error } = await supabase.from('visites').delete().eq('point_id', id);
+    if (error) throw error;
+  } catch (e) {
+    console.error('Erreur suppression Supabase', e);
   }
 }
 
 function isVisited(id) {
   return !!visited[id];
-}
-
-function markVisited(id, who) {
-  visited[id] = { at: new Date().toISOString(), by: who || '' };
-  saveVisited();
-}
-
-function unmarkVisited(id) {
-  delete visited[id];
-  saveVisited();
 }
 
 let map, markersLayer;
@@ -184,11 +198,13 @@ function buildPopup(pt) {
     </button>
   `;
   const btn = div.querySelector('.visit-btn');
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = '...';
     if (isVisited(pt.id)) {
-      unmarkVisited(pt.id);
+      await unmarkVisited(pt.id);
     } else {
-      markVisited(pt.id);
+      await markVisited(pt.id);
     }
     refreshMarker(pt);
     updateStats();
@@ -294,8 +310,13 @@ async function init() {
   document.getElementById('exportBtn').addEventListener('click', exportCSV);
   document.getElementById('resetBtn').addEventListener('click', async () => {
     if (confirm('Effacer tous les marquages de visite partagés par toute l\\'équipe ? Cette action est irréversible.')) {
+      try {
+        const { error } = await supabase.from('visites').delete().neq('point_id', '');
+        if (error) throw error;
+      } catch (e) {
+        console.error('Erreur reset Supabase', e);
+      }
       visited = {};
-      await saveVisited();
       renderMarkers();
     }
   });
