@@ -55,6 +55,7 @@
   <header>
     <h1>🗺️ Recensement ANAREKA-CI — Bingerville</h1>
     <div class="stats" id="statsHeader">Chargement…</div>
+    <div class="stats" id="syncStatus" style="font-weight:bold;">🟡 Connexion...</div>
   </header>
   <div id="controls">
     <label>Bloc:
@@ -158,6 +159,44 @@ async function unmarkVisited(id) {
 
 function isVisited(id) {
   return !!visited[id];
+}
+
+// --- Synchronisation en direct entre agents (Supabase Realtime) ---
+function applyRemoteChange(eventType, newRow, oldRow) {
+  const id = eventType === 'DELETE' ? oldRow.point_id : newRow.point_id;
+  if (!id) return;
+  const pt = DATA.find(p => p.id === id);
+  if (!pt) return;
+
+  if (eventType === 'DELETE') {
+    delete visited[id];
+  } else {
+    visited[id] = { at: newRow.visited_at, by: newRow.visited_by || '' };
+  }
+
+  refreshMarker(pt);
+  updateStats();
+}
+
+function subscribeRealtime() {
+  const statusEl = document.getElementById('syncStatus');
+  supabase
+    .channel('visites-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'visites' }, (payload) => {
+      applyRemoteChange(payload.eventType, payload.new, payload.old);
+    })
+    .subscribe((status) => {
+      if (!statusEl) return;
+      if (status === 'SUBSCRIBED') {
+        statusEl.textContent = '🟢 Sync en direct';
+        statusEl.title = 'Connecté — les marquages des autres agents apparaissent automatiquement';
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        statusEl.textContent = '🔴 Sync hors ligne';
+        statusEl.title = 'Reconnexion en cours... vérifiez votre connexion internet';
+      } else {
+        statusEl.textContent = '🟡 Connexion...';
+      }
+    });
 }
 
 let map, markersLayer;
@@ -302,6 +341,7 @@ async function init() {
 
   populateBlockFilter();
   renderMarkers();
+  subscribeRealtime();
 
   document.getElementById('filterBlock').addEventListener('change', renderMarkers);
   document.getElementById('filterStatus').addEventListener('change', renderMarkers);
@@ -309,7 +349,7 @@ async function init() {
   document.getElementById('searchBox').addEventListener('input', renderMarkers);
   document.getElementById('exportBtn').addEventListener('click', exportCSV);
   document.getElementById('resetBtn').addEventListener('click', async () => {
-    if (confirm('Effacer tous les marquages de visite partagés par toute l\\'équipe ? Cette action est irréversible.')) {
+    if (confirm('Effacer tous les marquages de visite partagés par toute l\'équipe ? Cette action est irréversible.')) {
       try {
         const { error } = await supabase.from('visites').delete().neq('point_id', '');
         if (error) throw error;
