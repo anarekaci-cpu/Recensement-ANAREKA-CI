@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <style>
-  :root { --vert: #1B5E20; --or: #E67E22; --noir: #222222; }
+  :root { --vert: #1B5E20; --or: #E67E22; --noir: #222222; --bleu: #1565C0; }
   * { box-sizing: border-box; }
   html, body { margin:0; padding:0; height:100%; font-family: Arial, sans-serif; background:#f4f4f4; }
   #app { display:flex; flex-direction:column; height:100%; }
@@ -28,12 +28,24 @@
   .popup-title { font-weight:bold; font-size:14px; margin-bottom:4px; }
   .popup-row { font-size:12.5px; margin:2px 0; }
   .popup-status { display:inline-block; padding:2px 6px; border-radius:4px; font-size:11px; font-weight:bold; margin-top:4px; }
-  .visit-btn { margin-top:8px; width:100%; padding:8px; border:none; border-radius:5px; font-size:13px; font-weight:bold; cursor:pointer; color:white; }
+  .popup-dist { font-size:11.5px; color:#555; margin-top:4px; }
+  .btn-row { display:flex; gap:6px; margin-top:8px; }
+  .visit-btn, .go-btn { padding:8px; border:none; border-radius:5px; font-size:13px; font-weight:bold; cursor:pointer; color:white; flex:1; text-align:center; text-decoration:none; display:block; }
   .btn-visit { background: var(--vert); }
   .btn-unvisit { background:#999; }
+  .go-btn { background: var(--bleu); }
   #resetBtn { background:#c0392b; color:white; border:none; padding:6px 10px; border-radius:4px; font-size:12px; cursor:pointer; }
   #exportBtn { background:#2980b9; color:white; border:none; padding:6px 10px; border-radius:4px; font-size:12px; cursor:pointer; }
+  #locateBtn { background: var(--bleu); color:white; border:none; padding:6px 10px; border-radius:4px; font-size:12px; cursor:pointer; }
+  #locateBtn.active { background:#0d47a1; box-shadow: inset 0 0 0 2px #90caf9; }
+  #nearestBtn { background: var(--or); color:white; border:none; padding:6px 10px; border-radius:4px; font-size:12px; cursor:pointer; }
+  #nearestBtn:disabled { background:#ccc; cursor:not-allowed; }
   #loading { position:absolute; inset:0; background:white; display:flex; align-items:center; justify-content:center; font-size:14px; color:#555; z-index:2000; transition:opacity .2s ease; }
+  .user-dot-wrap { position:relative; }
+  .user-dot-pulse { position:absolute; top:50%; left:50%; width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%; background: rgba(21,101,192,0.35); animation: pulse 1.6s ease-out infinite; }
+  @keyframes pulse { 0% { transform: scale(0.4); opacity:0.9; } 100% { transform: scale(1.6); opacity:0; } }
+  .user-dot { position:absolute; top:50%; left:50%; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%; background: var(--bleu); border:2px solid white; box-shadow:0 0 4px rgba(0,0,0,0.5); }
+  #geoStatus { font-size:11px; }
 </style>
 </head>
 <body>
@@ -59,8 +71,11 @@
       <option value="yes">Déjà visités</option>
     </select></label>
     <label>Recherche: <input type="text" id="searchBox" placeholder="Nom, quartier..." /></label>
+    <button id="locateBtn">📍 Me localiser</button>
+    <button id="nearestBtn" disabled>🎯 Point le plus proche</button>
     <button id="exportBtn">⬇️ Exporter suivi (CSV)</button>
     <button id="resetBtn">🗑️ Réinitialiser mes marquages</button>
+    <span id="geoStatus"></span>
   </div>
   <div id="main">
     <div id="map"></div>
@@ -73,6 +88,10 @@
       <div><span class="dot" style="background:#95a5a6"></span>Non défini</div>
       <div style="margin-top:6px; border-top:1px solid #ddd; padding-top:6px;">
         <span style="opacity:0.5;">⬤</span> = déjà visité (assombri)
+      </div>
+      <div style="margin-top:6px; border-top:1px solid #ddd; padding-top:6px;">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1565C0;border:1px solid white;box-shadow:0 0 0 1px #1565C0;"></span>
+        Votre position
       </div>
     </div>
     <div id="loading">Chargement de la carte…</div>
@@ -104,6 +123,13 @@ let visited = {};
 let markerRefs = {};
 let markersCluster;
 
+// ---- Géolocalisation ----
+let userMarker = null;
+let userAccuracyCircle = null;
+let userLatLng = null;
+let geoWatchId = null;
+let geoActive = false;
+
 const iconCache = {};
 function getIcon(color, isVis) {
   const key = color + (isVis ? '_v' : '_n');
@@ -119,6 +145,13 @@ function getIcon(color, isVis) {
   iconCache[key] = icon;
   return icon;
 }
+
+const userIcon = L.divIcon({
+  html: '<div class="user-dot-wrap"><div class="user-dot-pulse"></div><div class="user-dot"></div></div>',
+  className: '',
+  iconSize: [34, 34],
+  iconAnchor: [17, 17]
+});
 
 async function loadVisited() {
   try {
@@ -191,6 +224,30 @@ function subscribeRealtime() {
     });
 }
 
+// ---- Distances / itinéraires ----
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function formatDist(km) {
+  if (km < 1) return Math.round(km * 1000) + ' m';
+  return km.toFixed(1) + ' km';
+}
+
+function directionsUrl(pt) {
+  // Sans origine : l'appli Google Maps utilise automatiquement la position actuelle de l'appareil.
+  const dest = pt.lat + ',' + pt.lon;
+  let url = 'https://www.google.com/maps/dir/?api=1&destination=' + dest + '&travelmode=driving';
+  if (userLatLng) {
+    url += '&origin=' + userLatLng.lat + ',' + userLatLng.lng;
+  }
+  return url;
+}
+
 function attachPopup(marker, pt) {
   marker.bindPopup(() => buildPopupContent(pt), { minWidth: 230 });
 }
@@ -205,6 +262,11 @@ function buildPopupContent(pt) {
   const div = document.createElement('div');
   const vis = isVisited(pt.id);
   const color = STATUS_COLOR[pt.status] || '#95a5a6';
+  let distRow = '';
+  if (userLatLng) {
+    const d = haversineKm(userLatLng.lat, userLatLng.lng, pt.lat, pt.lon);
+    distRow = '<div class="popup-dist">📍 Distance depuis votre position : ' + formatDist(d) + '</div>';
+  }
   div.innerHTML = ''
     + '<div class="popup-title">' + pt.order + '. ' + esc(pt.name || '(sans nom)') + (vis ? ' <span style="color:#2e7d32">✔ Visité</span>' : '') + '</div>'
     + '<div class="popup-row"><b>Bloc:</b> ' + String(pt.block).padStart(2,'0') + ' — Ordre ' + pt.order + '</div>'
@@ -213,10 +275,13 @@ function buildPopupContent(pt) {
     + '<div class="popup-row"><b>Adresse:</b> ' + esc(pt.address || '—') + '</div>'
     + '<div class="popup-row"><b>Produits:</b> ' + esc(pt.produits || '—') + '</div>'
     + '<div class="popup-status" style="background:' + color + '22;color:' + color + ';border:1px solid ' + color + ';">' + esc(pt.status) + '</div>'
-    + '<br/>'
+    + distRow
+    + '<div class="btn-row">'
+    + '<a class="go-btn" href="' + directionsUrl(pt) + '" target="_blank" rel="noopener">🧭 Itinéraire</a>'
     + '<button class="visit-btn ' + (vis ? 'btn-unvisit' : 'btn-visit') + '" data-id="' + pt.id + '">'
-    + (vis ? '↩️ Annuler la visite' : '✅ Marquer comme visité')
-    + '</button>';
+    + (vis ? '↩️ Annuler' : '✅ Visité')
+    + '</button>'
+    + '</div>';
   const btn = div.querySelector('.visit-btn');
   btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -314,8 +379,94 @@ function debouncedRender() {
   debounceTimer = setTimeout(renderMarkers, 150);
 }
 
+// ---- Géolocalisation en direct ----
+let map; // référence globale à la carte
+
+function onGeoSuccess(pos) {
+  const { latitude, longitude, accuracy } = pos.coords;
+  userLatLng = { lat: latitude, lng: longitude };
+
+  if (!userMarker) {
+    userMarker = L.marker([latitude, longitude], { icon: userIcon, zIndexOffset: 1000 }).addTo(map);
+  } else {
+    userMarker.setLatLng([latitude, longitude]);
+  }
+
+  if (!userAccuracyCircle) {
+    userAccuracyCircle = L.circle([latitude, longitude], { radius: accuracy, color: '#1565C0', weight: 1, fillOpacity: 0.08 }).addTo(map);
+  } else {
+    userAccuracyCircle.setLatLng([latitude, longitude]);
+    userAccuracyCircle.setRadius(accuracy);
+  }
+
+  document.getElementById('nearestBtn').disabled = false;
+  document.getElementById('geoStatus').textContent = '✅ Position à ±' + Math.round(accuracy) + ' m';
+}
+
+function onGeoError(err) {
+  console.error('Erreur géolocalisation', err);
+  let msg = 'Position indisponible';
+  if (err.code === 1) msg = 'Autorisation refusée';
+  else if (err.code === 2) msg = 'Position indisponible';
+  else if (err.code === 3) msg = 'Délai dépassé';
+  document.getElementById('geoStatus').textContent = '⚠️ ' + msg;
+}
+
+function toggleGeolocation() {
+  const btn = document.getElementById('locateBtn');
+  if (!navigator.geolocation) {
+    document.getElementById('geoStatus').textContent = '⚠️ Géolocalisation non supportée';
+    return;
+  }
+  if (geoActive) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoActive = false;
+    btn.classList.remove('active');
+    btn.textContent = '📍 Me localiser';
+    document.getElementById('geoStatus').textContent = '';
+    document.getElementById('nearestBtn').disabled = true;
+    return;
+  }
+  geoActive = true;
+  btn.classList.add('active');
+  btn.textContent = '📍 Suivi actif…';
+  document.getElementById('geoStatus').textContent = 'Localisation en cours…';
+
+  // Premier centrage immédiat sur la position, puis suivi continu
+  navigator.geolocation.getCurrentPosition((pos) => {
+    onGeoSuccess(pos);
+    map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+  }, onGeoError, { enableHighAccuracy: true, timeout: 10000 });
+
+  geoWatchId = navigator.geolocation.watchPosition(onGeoSuccess, onGeoError, {
+    enableHighAccuracy: true,
+    maximumAge: 5000,
+    timeout: 15000
+  });
+}
+
+function goToNearest() {
+  if (!userLatLng) return;
+  // Ne considère que les points actuellement affichés par les filtres (et non visités par défaut si le filtre "Non visités" est actif)
+  let candidates = DATA.filter(passesFilters);
+  if (candidates.length === 0) candidates = DATA.filter(pt => !isVisited(pt.id));
+  if (candidates.length === 0) return;
+
+  let best = null, bestDist = Infinity;
+  candidates.forEach(pt => {
+    const d = haversineKm(userLatLng.lat, userLatLng.lng, pt.lat, pt.lon);
+    if (d < bestDist) { bestDist = d; best = pt; }
+  });
+  if (!best) return;
+
+  const marker = markerRefs[best.id];
+  map.setView([best.lat, best.lon], 17);
+  // Laisse le temps au cluster de se dégrouper avant d'ouvrir le popup
+  setTimeout(() => { if (marker) marker.openPopup(); }, 300);
+}
+
 async function init() {
-  const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([5.355, -3.885], 13);
+  map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([5.355, -3.885], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap',
@@ -348,6 +499,8 @@ async function init() {
   document.getElementById('filterVisited').addEventListener('change', debouncedRender);
   document.getElementById('searchBox').addEventListener('input', debouncedRender);
   document.getElementById('exportBtn').addEventListener('click', exportCSV);
+  document.getElementById('locateBtn').addEventListener('click', toggleGeolocation);
+  document.getElementById('nearestBtn').addEventListener('click', goToNearest);
   document.getElementById('resetBtn').addEventListener('click', async () => {
     if (confirm("Effacer tous les marquages de visite partagés par toute l'équipe ? Cette action est irréversible.")) {
       try {
