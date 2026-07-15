@@ -63,6 +63,23 @@
   #routeBanner b { color: var(--bleu); }
   #routeBanner button { background:#eee; border:none; border-radius:6px; padding:5px 9px; font-size:11px; cursor:pointer; }
 
+  /* ==== Navigation intégrée (turn-by-turn) ==== */
+  #navPanel { position:absolute; top:0; left:0; right:0; z-index:950; background: var(--bleu); color:white; padding:10px 14px; display:none; align-items:center; gap:12px; box-shadow:0 2px 10px rgba(0,0,0,0.3); }
+  #navPanel.show { display:flex; }
+  #navIcon { font-size:26px; width:38px; text-align:center; flex-shrink:0; }
+  #navInfo { flex:1; min-width:0; }
+  #navInstruction { font-size:14.5px; font-weight:700; line-height:1.25; }
+  #navSub { font-size:11.5px; opacity:0.9; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #navStopBtn { background:rgba(255,255,255,0.2); border:none; color:white; width:32px; height:32px; border-radius:8px; font-size:16px; flex-shrink:0; cursor:pointer; }
+  #navBottomBar { position:absolute; bottom:calc(12px + var(--safe-b)); left:50%; transform:translateX(-50%); z-index:900; background:white; padding:8px 16px; border-radius:20px; box-shadow:0 2px 10px rgba(0,0,0,0.25); font-size:12.5px; font-weight:600; color:#333; display:none; }
+  #navBottomBar.show { display:block; }
+  #arrivalBanner { position:absolute; top:70px; left:50%; transform:translateX(-50%); z-index:960; background:white; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.3); padding:14px 16px; font-size:13.5px; display:none; flex-direction:column; gap:10px; max-width:88%; text-align:center; }
+  #arrivalBanner.show { display:flex; }
+  #arrivalBanner .arrival-row { display:flex; gap:8px; }
+  #arrivalBanner button { flex:1; padding:9px; border:none; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer; color:white; }
+  .arrival-yes { background: var(--vert); }
+  .arrival-no { background:#999; }
+
   .leaflet-popup-content-wrapper { border-radius:12px; }
   .leaflet-popup-content { margin:12px 14px; }
   .popup-title { font-weight:700; font-size:14.5px; margin-bottom:5px; }
@@ -148,8 +165,26 @@
   <div id="main">
     <div id="map"></div>
 
+    <div id="navPanel">
+      <div id="navIcon">⬆️</div>
+      <div id="navInfo">
+        <div id="navInstruction">—</div>
+        <div id="navSub"></div>
+      </div>
+      <button id="navStopBtn" aria-label="Arrêter la navigation">✕</button>
+    </div>
+    <div id="navBottomBar"></div>
+
+    <div id="arrivalBanner">
+      <div id="arrivalText">🏁 Vous êtes arrivé !</div>
+      <div class="arrival-row">
+        <button class="arrival-yes" id="arrivalYesBtn">✅ Marquer visité</button>
+        <button class="arrival-no" id="arrivalNoBtn">Fermer</button>
+      </div>
+    </div>
+
     <div id="routeBanner">
-      <span>🧭 Itinéraire vers <b id="routeDestName"></b> — <span id="routeInfo"></span></span>
+      <span>🧭 Aperçu itinéraire vers <b id="routeDestName"></b> — <span id="routeInfo"></span></span>
       <button id="closeRouteBtn">✕</button>
     </div>
 
@@ -204,6 +239,17 @@ let geoActive = false;
 let routeLine = null;
 let routeDestMarker = null;
 let activeRoutePt = null;
+
+// ---- Navigation intégrée (turn-by-turn) ----
+let navActive = false;
+let navSteps = [];
+let navStepIdx = 0;
+let navDestPt = null;
+let navRouteCoords = [];
+let navLine = null;
+let lastRerouteAt = 0;
+let navRemainingDistance = 0;
+let navRemainingDuration = 0;
 
 const iconCache = {};
 function getIcon(color, isVis) {
@@ -331,6 +377,7 @@ function externalNavUrl(pt) {
   return url;
 }
 
+// ---- Aperçu d'itinéraire (sans navigation guidée) ----
 async function drawRoute(pt) {
   if (!userLatLng) {
     document.getElementById('geoStatus').textContent = "⚠️ Activez \"Me localiser\" pour tracer l'itinéraire sur la carte";
@@ -375,6 +422,199 @@ function clearRoute() {
   document.getElementById('routeBanner').classList.remove('show');
 }
 
+// ======================================================
+// ==========  NAVIGATION GUIDÉE (turn-by-turn)  =========
+// ======================================================
+
+const MODIFIER_FR = {
+  'left': 'à gauche', 'right': 'à droite',
+  'sharp left': 'fortement à gauche', 'sharp right': 'fortement à droite',
+  'slight left': 'légèrement à gauche', 'slight right': 'légèrement à droite',
+  'straight': 'tout droit', 'uturn': 'demi-tour'
+};
+const MODIFIER_ICON = {
+  'left': '⬅️', 'right': '➡️',
+  'sharp left': '↩️', 'sharp right': '↪️',
+  'slight left': '↖️', 'slight right': '↗️',
+  'straight': '⬆️', 'uturn': '🔄'
+};
+
+function stepInstruction(step) {
+  const m = step.maneuver || {};
+  const street = step.name ? (' sur ' + step.name) : '';
+  const mod = MODIFIER_FR[m.modifier] || '';
+  switch (m.type) {
+    case 'depart': return 'Démarrez' + street;
+    case 'arrive': return 'Vous êtes arrivé à destination';
+    case 'turn': return 'Tournez ' + mod + street;
+    case 'continue': return (mod ? 'Continuez ' + mod : 'Continuez tout droit') + street;
+    case 'new name': return 'Continuez' + street;
+    case 'merge': return 'Rejoignez la voie' + street;
+    case 'fork': return 'Restez ' + (mod || 'sur la voie') + street;
+    case 'end of road': return 'Au bout de la route, tournez ' + mod + street;
+    case 'roundabout':
+    case 'rotary': return 'Au rond-point, prenez la sortie' + (m.exit ? ' n°' + m.exit : '') + street;
+    case 'roundabout turn': return 'Au rond-point, tournez ' + mod + street;
+    case 'exit roundabout': return 'Sortez du rond-point' + street;
+    default: return 'Continuez' + street;
+  }
+}
+
+function stepIcon(step) {
+  const m = step.maneuver || {};
+  if (m.type === 'arrive') return '🏁';
+  if (m.type === 'depart') return '📍';
+  if (m.type === 'roundabout' || m.type === 'rotary') return '🔄';
+  return MODIFIER_ICON[m.modifier] || '⬆️';
+}
+
+async function fetchRouteWithSteps(origin, dest) {
+  const url = 'https://router.project-osrm.org/route/v1/driving/'
+    + origin.lng + ',' + origin.lat + ';' + dest.lon + ',' + dest.lat
+    + '?overview=full&geometries=geojson&steps=true';
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.routes || !data.routes.length) throw new Error('no route');
+  return data.routes[0];
+}
+
+async function startNavigation(pt) {
+  if (!userLatLng) {
+    document.getElementById('geoStatus').textContent = "⚠️ Activez \"Me localiser\" pour démarrer la navigation";
+    openControls();
+    return;
+  }
+
+  // On coupe l'aperçu simple s'il était affiché
+  clearRoute();
+
+  navDestPt = pt;
+  document.getElementById('navInstruction').textContent = "Calcul de l'itinéraire…";
+  document.getElementById('navSub').textContent = '';
+  document.getElementById('navPanel').classList.add('show');
+
+  try {
+    const route = await fetchRouteWithSteps(userLatLng, pt);
+    applyNavRoute(route);
+    navActive = true;
+    lastRerouteAt = Date.now();
+    map.setView([userLatLng.lat, userLatLng.lng], 17);
+  } catch (e) {
+    console.error('Erreur démarrage navigation', e);
+    document.getElementById('navPanel').classList.remove('show');
+    navDestPt = null;
+    const useExternal = confirm("Le service d'itinéraire est momentanément indisponible. Ouvrir la navigation dans Maps à la place ?");
+    if (useExternal) window.open(externalNavUrl(pt), '_blank');
+  }
+}
+
+function applyNavRoute(route) {
+  navSteps = (route.legs && route.legs[0] && route.legs[0].steps) || [];
+  navStepIdx = 0;
+  navRemainingDistance = route.distance;
+  navRemainingDuration = route.duration;
+  navRouteCoords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+
+  if (navLine) map.removeLayer(navLine);
+  navLine = L.polyline(navRouteCoords, { color: '#1565C0', weight: 6, opacity: 0.85 }).addTo(map);
+
+  updateNavPanel();
+  document.getElementById('navBottomBar').classList.add('show');
+}
+
+function updateNavPanel() {
+  const step = navSteps[navStepIdx];
+  if (!step) return;
+  document.getElementById('navIcon').textContent = stepIcon(step);
+  document.getElementById('navInstruction').textContent = stepInstruction(step);
+  const nextStep = navSteps[navStepIdx + 1];
+  document.getElementById('navSub').textContent = nextStep ? ('Puis : ' + stepInstruction(nextStep)) : '';
+  document.getElementById('navBottomBar').textContent =
+    formatDist(navRemainingDistance / 1000) + ' · ' + formatDuration(navRemainingDuration) + ' restants';
+}
+
+function stopNavigation(silent) {
+  navActive = false;
+  navSteps = [];
+  navStepIdx = 0;
+  navDestPt = null;
+  if (navLine) { map.removeLayer(navLine); navLine = null; }
+  document.getElementById('navPanel').classList.remove('show');
+  document.getElementById('navBottomBar').classList.remove('show');
+  if (!silent) document.getElementById('arrivalBanner').classList.remove('show');
+}
+
+function distToLatLon(lat, lon) {
+  if (!userLatLng) return Infinity;
+  return haversineKm(userLatLng.lat, userLatLng.lng, lat, lon) * 1000; // en mètres
+}
+
+function nearestRouteDistanceMeters() {
+  let min = Infinity;
+  for (let i = 0; i < navRouteCoords.length; i += 1) {
+    const d = distToLatLon(navRouteCoords[i][0], navRouteCoords[i][1]);
+    if (d < min) min = d;
+    if (min < 5) break;
+  }
+  return min;
+}
+
+async function updateNavigationProgress() {
+  if (!navActive || !navDestPt || !navSteps.length) return;
+
+  const distToDest = distToLatLon(navDestPt.lat, navDestPt.lon);
+  if (distToDest < 25) {
+    handleArrival();
+    return;
+  }
+
+  // Avancer à l'étape suivante si on approche du point de manœuvre
+  const step = navSteps[navStepIdx];
+  if (step && step.maneuver && step.maneuver.location) {
+    const mlon = step.maneuver.location[0];
+    const mlat = step.maneuver.location[1];
+    const d = distToLatLon(mlat, mlon);
+    if (d < 30 && navStepIdx < navSteps.length - 1) {
+      navStepIdx += 1;
+    }
+  }
+  // Distance restante approximative = distance à vol d'oiseau vers la destination
+  // (affichage indicatif ; recalculée précisément à chaque reroute)
+  updateNavPanel();
+
+  const now = Date.now();
+  if (now - lastRerouteAt > 15000) {
+    const offRoute = nearestRouteDistanceMeters() > 60;
+    if (offRoute) {
+      lastRerouteAt = now;
+      try {
+        const route = await fetchRouteWithSteps(userLatLng, navDestPt);
+        applyNavRoute(route);
+      } catch (e) {
+        console.error('Erreur recalcul itinéraire', e);
+      }
+    }
+  }
+}
+
+function handleArrival() {
+  const pt = navDestPt;
+  stopNavigation(true);
+  document.getElementById('arrivalText').textContent = '🏁 Vous êtes arrivé chez ' + (pt.name || 'ce point') + ' !';
+  document.getElementById('arrivalBanner').classList.add('show');
+  document.getElementById('arrivalYesBtn').onclick = async () => {
+    await markVisited(pt.id);
+    refreshMarker(pt);
+    updateStats();
+    document.getElementById('arrivalBanner').classList.remove('show');
+  };
+  document.getElementById('arrivalNoBtn').onclick = () => {
+    document.getElementById('arrivalBanner').classList.remove('show');
+  };
+}
+
+// ======================================================
+
 function attachPopup(marker, pt) {
   marker.bindPopup(() => buildPopupContent(pt), { minWidth: 240 });
 }
@@ -404,8 +644,8 @@ function buildPopupContent(pt) {
     + '<div class="popup-status" style="background:' + color + '22;color:' + color + ';border:1px solid ' + color + ';">' + esc(pt.status) + '</div>'
     + distRow
     + '<div class="btn-row">'
-    + '<button class="go-btn" data-route-id="' + pt.id + '">🧭 Tracer</button>'
-    + '<a class="go-btn" style="background:#0d47a1;" href="' + externalNavUrl(pt) + '" target="_blank" rel="noopener">🎙️ Naviguer</a>'
+    + '<button class="go-btn" data-route-id="' + pt.id + '">🧭 Aperçu</button>'
+    + '<button class="go-btn" style="background:#0d47a1;" data-nav-id="' + pt.id + '">▶️ Naviguer</button>'
     + '</div>'
     + '<div class="btn-row">'
     + '<button class="visit-btn ' + (vis ? 'btn-unvisit' : 'btn-visit') + '" data-id="' + pt.id + '" style="flex:1;">'
@@ -425,6 +665,13 @@ function buildPopupContent(pt) {
     drawRoute(pt);
     map.closePopup();
   });
+  const navBtn = div.querySelector('[data-nav-id]');
+  if (navBtn) {
+    navBtn.addEventListener('click', () => {
+      startNavigation(pt);
+      map.closePopup();
+    });
+  }
   return div;
 }
 
@@ -537,7 +784,12 @@ function onGeoSuccess(pos) {
   document.getElementById('fabNearest').classList.add('show');
   document.getElementById('geoStatus').textContent = '✅ Position à ±' + Math.round(accuracy) + ' m';
 
-  if (activeRoutePt) drawRoute(activeRoutePt);
+  if (navActive) {
+    updateNavigationProgress();
+    map.setView([latitude, longitude], map.getZoom() < 15 ? 17 : map.getZoom(), { animate: true });
+  } else if (activeRoutePt) {
+    drawRoute(activeRoutePt);
+  }
 }
 
 function onGeoError(err) {
@@ -563,6 +815,7 @@ function toggleGeolocation() {
     document.getElementById('geoStatus').textContent = '';
     document.getElementById('nearestBtn').disabled = true;
     document.getElementById('fabNearest').classList.remove('show');
+    if (navActive) stopNavigation();
     return;
   }
   geoActive = true;
@@ -640,6 +893,7 @@ async function init() {
   document.getElementById('nearestBtn').addEventListener('click', goToNearest);
   document.getElementById('fabNearest').addEventListener('click', goToNearest);
   document.getElementById('closeRouteBtn').addEventListener('click', clearRoute);
+  document.getElementById('navStopBtn').addEventListener('click', () => stopNavigation());
   document.getElementById('resetBtn').addEventListener('click', async () => {
     if (confirm("Effacer tous les marquages de visite partagés par toute l'équipe ? Cette action est irréversible.")) {
       try {
