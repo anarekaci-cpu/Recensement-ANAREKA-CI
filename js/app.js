@@ -1,138 +1,131 @@
-// app.js — Point d'entrée de l'application
-window.App = (function() {
-  const points = window.DATA;
-  
-  function updateStats() {
-    const total = points.length;
-    const visited = points.filter(p => window.StorageManager.isVisited(p.id)).length;
-    const pct = total ? Math.round(visited/total*100) : 0;
-    document.getElementById('statsHeader').textContent = visited+' / '+total+' visités ('+pct+'%)';
-  }
-  
-  function populateBlockFilter() {
-    const sel = document.getElementById('filterBlock');
-    const blocks = [...new Set(points.map(p => p.block))].sort((a,b) => a-b);
-    blocks.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = String(b);
-      opt.textContent = 'Bloc '+String(b).padStart(2,'0');
-      sel.appendChild(opt);
-    });
-  }
-  
-  function exportCSV() {
-    const rows = [['Bloc','Ordre','Nom','Tel','Quartier','Adresse','Statut','Sexe','Produits','Visité','Date']];
-    points.forEach(p => {
-      const v = window.StorageManager.getVisited()[p.id];
-      rows.push([p.block, p.order, p.name, p.tel, p.quartier, p.address, p.status, p.sexe, p.produits, v?'OUI':'NON', v?v.at:'']);
-    });
-    const csv = rows.map(r => r.map(c => '"'+String(c??'').replace(/"/g,'""')+'"').join(',')).join('\n');
-    const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'bingerville_'+new Date().toISOString().slice(0,10)+'.csv';
-    a.click();
-  }
-  
-  function goToNearest() {
-    const pos = window.GeoManager.getPosition();
-    if (!pos) return;
-    
-    let candidates = points.filter(p => window.MarkerManager.passesFilters(p));
-    if (!candidates.length) candidates = points.filter(p => !window.StorageManager.isVisited(p.id));
-    if (!candidates.length) return;
-    
-    let best = null, bestDist = Infinity;
-    candidates.forEach(p => {
-      const d = window.Navigation ? 0 : 0; // haversine
-      // Implémentation simplifiée : on utilise les coordonnées
-      const dlat = p.lat - pos.lat, dlng = p.lon - pos.lng;
-      const dist = Math.sqrt(dlat*dlat + dlng*dlng);
-      if (dist < bestDist) { bestDist = dist; best = p; }
-    });
-    
-    if (best) {
-      document.getElementById('controls').classList.remove('open');
-      map.setView([best.lat, best.lon], 17);
-      setTimeout(() => {
-        const marker = window.MapManager.getMarker(best.id);
-        if (marker) marker.openPopup();
-      }, 300);
-    }
-  }
-  
-  async function init() {
-    // Charger les visites
-    await window.StorageManager.load();
-    
-    // Initialiser la carte
-    const map = window.MapManager.init();
-    
-    // Initialiser les modules
-    window.GeoManager.init(map);
-    window.Navigation.init(map);
-    window.Compass.init();
-    
-    // Construire les marqueurs
-    window.MapManager.buildAllMarkers(points, null);
-    
-    // Rendu initial
-    populateBlockFilter();
-    window.MapManager.renderMarkers(points);
-    updateStats();
-    
-    // Cacher le loading
-    document.getElementById('loading').style.display = 'none';
-    
-    // Abonnement temps réel
-    window.StorageManager.subscribe((pointId) => {
-      const pt = points.find(p => p.id === pointId);
-      if (pt) {
-        window.MarkerManager.refreshMarker(
-          window.MapManager.getMarker(pointId),
-          pt,
-          window.GeoManager.getPosition()
-        );
-        updateStats();
-      }
-    });
-    
-    // Événements UI
-    document.getElementById('menuToggleBtn').onclick = () => {
-      document.getElementById('controls').classList.toggle('open');
-    };
-    
-    ['filterBlock', 'filterStatus', 'filterVisited'].forEach(id => {
-      document.getElementById(id).onchange = () => window.MapManager.debouncedRender(points);
-    });
-    document.getElementById('searchBox').oninput = () => window.MapManager.debouncedRender(points);
-    
-    document.getElementById('locateBtn').onclick = () => window.GeoManager.toggle();
-    document.getElementById('nearestBtn').onclick = goToNearest;
-    document.getElementById('fabNearest').onclick = goToNearest;
-    document.getElementById('exportBtn').onclick = exportCSV;
-    document.getElementById('closeRouteBtn').onclick = () => window.Navigation.clearRoute();
-    document.getElementById('navStopBtn').onclick = () => window.Navigation.stopNavigation();
-    
-    document.getElementById('resetBtn').onclick = async () => {
-      if (confirm('Effacer TOUS les marquages ? Irréversible.')) {
-        await window.StorageManager.resetAll();
-        window.MapManager.renderMarkers(points);
-        updateStats();
-      }
-    };
-    
-    // Raccourci recherche
-    document.addEventListener('keydown', e => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        document.getElementById('searchBox').focus();
-      }
-    });
-  }
-  
-  return { init, updateStats };
-})();
+// === Point d'entrée de l'application ===
+document.addEventListener("DOMContentLoaded", async () => {
+  await window.Storage.init();
+  const map = window.MapModule.init();
+  window.Navigation.init(map);
+  window.Compass.init();
+  window.Geolocation.start(map);
 
-// Démarrage
-window.App.init();
+  const menuBtn = document.getElementById("menuToggleBtn");
+  if (menuBtn) {
+    menuBtn.onclick = () => {
+      document.getElementById("controls").classList.toggle("open");
+    };
+  }
+
+  function currentFilters() {
+    return {
+      block: document.getElementById("filterBlock").value,
+      status: document.getElementById("filterStatus").value,
+      visited: document.getElementById("filterVisited").value,
+      search: document.getElementById("searchBox").value.trim()
+    };
+  }
+
+  ["filterBlock", "filterStatus", "filterVisited"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el)
+      el.addEventListener("change", () =>
+        window.Markers.applyFilters(currentFilters())
+      );
+  });
+
+  const searchBox = document.getElementById("searchBox");
+  if (searchBox) {
+    searchBox.addEventListener("input", () =>
+      window.Markers.applyFilters(currentFilters())
+    );
+  }
+
+  const locateBtn = document.getElementById("locateBtn");
+  if (locateBtn) locateBtn.onclick = () => window.Geolocation.locateAndCenter(map);
+
+  const nearestBtn = document.getElementById("nearestBtn");
+  if (nearestBtn) {
+    nearestBtn.onclick = () => {
+      const res = window.Geolocation.findNearest();
+      if (res) {
+        map.setView([res.point.lat, res.point.lon], 17);
+        window.Markers.getMarker(res.point.id).openPopup();
+      } else {
+        alert("Aucun point non-visité trouvé, ou position inconnue.");
+      }
+    };
+  }
+
+  const fabNearest = document.getElementById("fabNearest");
+  if (fabNearest) fabNearest.onclick = () => nearestBtn && nearestBtn.click();
+
+  const exportBtn = document.getElementById("exportBtn");
+  if (exportBtn) {
+    exportBtn.onclick = () => {
+      const points = window.Markers.getAllPoints();
+      const header = [
+        "id",
+        "block",
+        "name",
+        "tel",
+        "quartier",
+        "address",
+        "produits",
+        "sexe",
+        "status",
+        "visite",
+        "lat",
+        "lon"
+      ];
+      const rows = points.map((p) => [
+        p.id,
+        p.block,
+        p.name,
+        p.tel,
+        p.quartier,
+        p.address,
+        p.produits,
+        p.sexe,
+        p.status,
+        p.visited ? "oui" : "non",
+        p.lat,
+        p.lon
+      ]);
+      const csv = [header, ...rows]
+        .map((r) =>
+          r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")
+        )
+        .join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "recensement_export.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+  }
+
+  const resetBtn = document.getElementById("resetBtn");
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      if (confirm("Réinitialiser toutes les visites enregistrées localement ?")) {
+        window.Storage.reset();
+        location.reload();
+      }
+    };
+  }
+
+  const closeRouteBtn = document.getElementById("closeRouteBtn");
+  if (closeRouteBtn) closeRouteBtn.onclick = () => window.Navigation.stop();
+
+  const navStopBtn = document.getElementById("navStopBtn");
+  if (navStopBtn) navStopBtn.onclick = () => window.Navigation.stop();
+
+  const arrivalYesBtn = document.getElementById("arrivalYesBtn");
+  if (arrivalYesBtn)
+    arrivalYesBtn.onclick = () => window.Navigation.markArrivedVisited();
+
+  const arrivalNoBtn = document.getElementById("arrivalNoBtn");
+  if (arrivalNoBtn)
+    arrivalNoBtn.onclick = () => {
+      document.getElementById("arrivalBanner").style.display = "none";
+    };
+});
