@@ -1,128 +1,97 @@
-// storage.js — Gestion du stockage (Supabase + localStorage)
-window.StorageManager = (function() {
-  const cfg = window.APP_CONFIG;
-  
-  let supabase;
-  try {
-    supabase = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY);
-  } catch (e) {
-    console.error('Supabase init failed, using localStorage only');
-    supabase = null;
-  }
-  
-  let visited = {};
-  
-  async function loadFromSupabase() {
-    if (!supabase) return {};
+// === Stockage / synchronisation des visites ===
+window.Storage = (function () {
+  let supabase = null;
+  let localState = {};
+  const LS_KEY = "anareka_visits_v1";
+
+  function loadLocal() {
     try {
-      const { data, error } = await supabase.from('visites').select('point_id, visited_at, visited_by');
-      if (error) throw error;
-      const result = {};
-      (data || []).forEach(row => {
-        result[row.point_id] = { at: row.visited_at, by: row.visited_by || '' };
-      });
-      return result;
+      localState = JSON.parse(localStorage.getItem(LS_KEY)) || {};
     } catch (e) {
-      console.error('Supabase load error:', e);
-      return {};
+      localState = {};
     }
+    console.log("Loaded", Object.keys(localState).length, "visited points");
   }
-  
-  function loadFromLocal() {
-    try {
-      const raw = localStorage.getItem('bingerville_visited');
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      return {};
-    }
+
+  function saveLocal() {
+    localStorage.setItem(LS_KEY, JSON.stringify(localState));
   }
-  
-  function saveToLocal(data) {
-    try {
-      localStorage.setItem('bingerville_visited', JSON.stringify(data));
-    } catch (e) {
-      console.error('localStorage save error:', e);
-    }
+
+  function setSyncStatus(online) {
+    const el = document.getElementById("syncStatus");
+    if (!el) return;
+    el.textContent = online ? "🟢 Synchronisé" : "🟡 Mode local";
   }
-  
-  async function load() {
-    visited = await loadFromSupabase();
-    if (Object.keys(visited).length === 0) {
-      visited = loadFromLocal();
-    }
-    console.log(`Loaded ${Object.keys(visited).length} visited points`);
-    return visited;
-  }
-  
-  async function markVisited(id, who) {
-    const record = { at: new Date().toISOString(), by: who || '' };
-    visited[id] = record;
-    saveToLocal(visited);
-    
-    if (supabase) {
+
+  async function init() {
+    loadLocal();
+    const cfg = window.APP_CONFIG;
+    const configured =
+      cfg.SUPABASE_URL && cfg.SUPABASE_URL.indexOf("YOUR-PROJECT") === -1;
+
+    if (configured && window.supabase) {
       try {
-        await supabase.from('visites').upsert({
-          point_id: id, visited_at: record.at, visited_by: record.by
-        });
-      } catch (e) {
-        console.error('Supabase mark error:', e);
-      }
-    }
-    return record;
-  }
-  
-  async function unmarkVisited(id) {
-    delete visited[id];
-    saveToLocal(visited);
-    
-    if (supabase) {
-      try {
-        await supabase.from('visites').delete().eq('point_id', id);
-      } catch (e) {
-        console.error('Supabase unmark error:', e);
-      }
-    }
-  }
-  
-  async function resetAll() {
-    visited = {};
-    saveToLocal(visited);
-    localStorage.removeItem('bingerville_visited');
-    if (supabase) {
-      try {
-        await supabase.from('visites').delete().neq('point_id', '');
-      } catch (e) {
-        console.error('Supabase reset error:', e);
-      }
-    }
-  }
-  
-  function isVisited(id) { return !!visited[id]; }
-  function getVisited() { return visited; }
-  function getAll() { return visited; }
-  
-  function subscribe(callback) {
-    if (!supabase) return;
-    supabase.channel('visites-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'visites' }, (payload) => {
-        const id = payload.eventType === 'DELETE' ? payload.old.point_id : payload.new.point_id;
-        if (!id) return;
-        if (payload.eventType === 'DELETE') {
-          delete visited[id];
-        } else {
-          visited[id] = { at: payload.new.visited_at, by: payload.new.visited_by || '' };
+        supabase = window.supabase.createClient(
+          cfg.SUPABASE_URL,
+          cfg.SUPABASE_ANON_KEY
+        );
+        const { data, error } = await supabase
+          .from(cfg.TABLE_NAME)
+          .select("*");
+        if (!error && data) {
+          data.forEach((row) => {
+            localState[row.point_id] = row;
+          });
+          saveLocal();
         }
-        saveToLocal(visited);
-        if (callback) callback(id, payload.eventType);
-      })
-      .subscribe((status) => {
-        const el = document.getElementById('syncStatus');
-        if (!el) return;
-        if (status === 'SUBSCRIBED') { el.textContent = '🟢 Sync en direct'; }
-        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { el.textContent = '🔴 Hors ligne'; }
-        else { el.textContent = '🟡 Connexion...'; }
-      });
+        setSyncStatus(true);
+      } catch (e) {
+        console.warn("Supabase indisponible, passage en mode local.", e);
+        setSyncStatus(false);
+      }
+    } else {
+      setSyncStatus(false);
+    }
   }
-  
-  return { load, markVisited, unmarkVisited, resetAll, isVisited, getVisited, getAll, subscribe };
+
+  function getOverride(id) {
+    return localState[id] || null;
+  }
+
+  async function setVisited(id, visited, statut) {
+    const entry = Object.assign({}, localState[id], {
+      point_id: id,
+      visited: visited,
+      statut:
+        statut !== undefined
+          ? statut
+          : localState[id]
+          ? localState[id].statut
+          : undefined,
+      updated_at: new Date().toISOString()
+    });
+    localState[id] = entry;
+    saveLocal();
+
+    if (supabase) {
+      try {
+        await supabase
+          .from(window.APP_CONFIG.TABLE_NAME)
+          .upsert(entry, { onConflict: "point_id" });
+      } catch (e) {
+        console.warn("Échec de synchronisation Supabase.", e);
+      }
+    }
+  }
+
+  function reset() {
+    localState = {};
+    saveLocal();
+  }
+
+  function all() {
+    return localState;
+  }
+
+  return { init, getOverride, setVisited, reset, all };
 })();
