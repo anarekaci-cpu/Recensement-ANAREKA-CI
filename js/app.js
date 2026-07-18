@@ -40,6 +40,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   const locateBtn = document.getElementById("locateBtn");
   if (locateBtn) locateBtn.onclick = () => window.Geolocation.locateAndCenter(map);
 
+  const fitFilteredBtn = document.getElementById("fitFilteredBtn");
+  if (fitFilteredBtn) {
+    fitFilteredBtn.onclick = () => {
+      const bounds = window.Markers.getFilteredBounds();
+      if (bounds) {
+        map.fitBounds(bounds, { padding: [40, 40] });
+      } else {
+        alert("Aucun point ne correspond aux filtres actuels.");
+      }
+    };
+  }
+
   const nearestBtn = document.getElementById("nearestBtn");
   if (nearestBtn) {
     nearestBtn.onclick = () => {
@@ -61,37 +73,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     exportBtn.onclick = () => {
       const points = window.Markers.getAllPoints();
       const header = [
-        "id",
-        "block",
-        "name",
-        "tel",
-        "quartier",
-        "address",
-        "produits",
-        "sexe",
-        "status",
-        "visite",
-        "lat",
-        "lon"
+        "id", "block", "name", "tel", "quartier", "address",
+        "produits", "sexe", "status", "visite", "lat", "lon"
       ];
       const rows = points.map((p) => [
-        p.id,
-        p.block,
-        p.name,
-        p.tel,
-        p.quartier,
-        p.address,
-        p.produits,
-        p.sexe,
-        p.status,
-        p.visited ? "oui" : "non",
-        p.lat,
-        p.lon
+        p.id, p.block, p.name, p.tel, p.quartier, p.address,
+        p.produits, p.sexe, p.status, p.visited ? "oui" : "non", p.lat, p.lon
       ]);
       const csv = [header, ...rows]
-        .map((r) =>
-          r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")
-        )
+        .map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
         .join("\n");
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
