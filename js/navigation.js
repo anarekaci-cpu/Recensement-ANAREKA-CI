@@ -4,6 +4,7 @@ window.Navigation = (function () {
   let routeLine = null;
   let destination = null;
   let active = false;
+  let lastDeviceHeading = null;
 
   function init(mapInstance) {
     map = mapInstance;
@@ -50,6 +51,52 @@ window.Navigation = (function () {
     }
   }
 
+  // Cap géographique (bearing) de la position courante vers la destination, en degrés (0-360, 0 = Nord)
+  function bearingTo(lat1, lon1, lat2, lon2) {
+    const toRad = (v) => (v * Math.PI) / 180;
+    const toDeg = (v) => (v * 180) / Math.PI;
+    const dLon = toRad(lon2 - lon1);
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+    const x =
+      Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+      Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+
+  function setArrowRotation(deg) {
+    const icon = document.getElementById("navIcon");
+    if (icon && active) icon.style.transform = `rotate(${deg}deg)`;
+  }
+
+  function refreshArrowDirection(pos) {
+    if (!active || !destination) return;
+    const targetBearing = bearingTo(
+      pos.coords.latitude,
+      pos.coords.longitude,
+      destination.lat,
+      destination.lon
+    );
+
+    const compassSupported =
+      window.Compass && window.Compass.isSupported() && lastDeviceHeading !== null;
+
+    // Si on connaît le cap du téléphone, la flèche pointe vers la destination
+    // quelle que soit l'orientation du téléphone. Sinon, on affiche le cap
+    // brut (Nord = 0°) comme repli, moins précis mais toujours utile.
+    const rotation = compassSupported
+      ? targetBearing - lastDeviceHeading
+      : targetBearing;
+
+    setArrowRotation(rotation);
+
+    const navSub = document.getElementById("navSub");
+    if (navSub) {
+      navSub.textContent = compassSupported
+        ? `Cap ${Math.round(targetBearing)}°`
+        : `Cap ${Math.round(targetBearing)}° (boussole indisponible)`;
+    }
+  }
+
   function onPositionUpdate(pos) {
     if (!active || !destination) return;
     const d = window.Geolocation.distanceMeters(
@@ -61,19 +108,24 @@ window.Navigation = (function () {
     document.getElementById("navInstruction").textContent = `${Math.round(
       d
     )} m restants`;
+    refreshArrowDirection(pos);
     if (d <= window.APP_CONFIG.ARRIVAL_RADIUS_M) {
       document.getElementById("arrivalBanner").style.display = "flex";
     }
   }
 
-  function updateHeading(h) {
-    const icon = document.getElementById("navIcon");
-    if (icon && active) icon.style.transform = `rotate(${h}deg)`;
+  // Appelé par compass.js à chaque lecture du capteur d'orientation du téléphone.
+  function updateHeading(deviceHeading) {
+    lastDeviceHeading = deviceHeading;
+    // Recalcule immédiatement la flèche avec le nouveau cap, si une nav est active.
+    const pos = window.Geolocation && window.Geolocation.getCurrentPos();
+    if (pos) refreshArrowDirection(pos);
   }
 
   function stop() {
     active = false;
     destination = null;
+    lastDeviceHeading = null;
     if (routeLine) {
       map.removeLayer(routeLine);
       routeLine = null;
