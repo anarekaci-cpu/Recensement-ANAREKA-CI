@@ -2,6 +2,8 @@
 window.Geolocation = (function () {
   let currentPos = null;
   let userMarker = null;
+  let watchId = null;
+  const ACCURACY_WARN_M = 50;
 
   function toRad(v) {
     return (v * Math.PI) / 180;
@@ -42,14 +44,20 @@ window.Geolocation = (function () {
       setStatus("Géolocalisation non supportée sur cet appareil.");
       return;
     }
+    if (watchId !== null) return; // déjà en cours, évite les doublons de watch
     setStatus("Localisation en cours…");
-    navigator.geolocation.watchPosition(
+    watchId = navigator.geolocation.watchPosition(
       (pos) => {
         currentPos = pos;
         updateUserMarker(map);
         const nearestBtn = document.getElementById("nearestBtn");
         if (nearestBtn) nearestBtn.disabled = false;
-        setStatus(`Précision : ${Math.round(pos.coords.accuracy)} m`);
+        const acc = Math.round(pos.coords.accuracy);
+        setStatus(
+          acc > ACCURACY_WARN_M
+            ? `⚠️ Précision faible : ${acc} m — déplacez-vous à ciel ouvert`
+            : `Précision : ${acc} m`
+        );
         if (window.Navigation) window.Navigation.onPositionUpdate(pos);
       },
       (err) => {
@@ -57,6 +65,13 @@ window.Geolocation = (function () {
       },
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
     );
+  }
+
+  function stop() {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
   }
 
   function locateAndCenter(map) {
@@ -95,5 +110,12 @@ window.Geolocation = (function () {
     return currentPos;
   }
 
-  return { start, locateAndCenter, findNearest, getCurrentPos, distanceMeters };
+  return {
+    start,
+    stop,
+    locateAndCenter,
+    findNearest,
+    getCurrentPos,
+    distanceMeters
+  };
 })();
