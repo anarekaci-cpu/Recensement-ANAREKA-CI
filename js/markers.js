@@ -175,9 +175,9 @@ window.Markers = (function() {
   function updateStatsHeader() {
     const el = document.getElementById('statsHeader');
     if (!el) return;
-    const total = window.DATA.length;
+    const total = DATA.length;
     let visitedCount = 0;
-    window.DATA.forEach((pt) => {
+    DATA.forEach((pt) => {
       if (isVisited(pt.id)) visitedCount++;
     });
     el.textContent = `${visitedCount} / ${total} visités`;
@@ -187,7 +187,7 @@ window.Markers = (function() {
   function populateBlockFilter() {
     const select = document.getElementById('filterBlock');
     if (!select) return;
-    const blocks = Array.from(new Set(window.DATA.map((p) => p.block))).sort((a, b) => a - b);
+    const blocks = Array.from(new Set(DATA.map((p) => p.block))).sort((a, b) => a - b);
     blocks.forEach((b) => {
       const opt = document.createElement('option');
       opt.value = String(b);
@@ -201,7 +201,7 @@ window.Markers = (function() {
     mapRef = map;
     clusterGroup = L.markerClusterGroup();
 
-    window.DATA.forEach((pt) => {
+    DATA.forEach((pt) => {
       pointsById[pt.id] = pt;
       const status = effectiveStatus(pt);
       const color = cfg.STATUS_COLORS[status] || '#95a5a6';
@@ -221,7 +221,7 @@ window.Markers = (function() {
 
   // === Accès aux données ===
   function getAllPoints() {
-    return window.DATA.map((pt) => Object.assign({}, pt, {
+    return DATA.map((pt) => Object.assign({}, pt, {
       status: effectiveStatus(pt),
       visited: isVisited(pt.id)
     }));
