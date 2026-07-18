@@ -8,7 +8,6 @@ window.Markers = (function() {
   const markersById = {};
   const pointsById = {};
 
-  // === Icônes ===
   function getIcon(color, isVis) {
     const key = color + (isVis ? '_v' : '_n');
     if (iconCache[key]) return iconCache[key];
@@ -32,7 +31,6 @@ window.Markers = (function() {
     return div.innerHTML;
   }
 
-  // === Aides visite / statut effectif (tient compte des overrides locaux/Supabase) ===
   function isVisited(id) {
     const o = window.Storage.getOverride(id);
     return !!(o && o.visited);
@@ -63,7 +61,6 @@ window.Markers = (function() {
     return km.toFixed(1) + ' km';
   }
 
-  // === Popup ===
   function buildPopupContent(pt) {
     const div = document.createElement('div');
     const vis = isVisited(pt.id);
@@ -123,7 +120,6 @@ window.Markers = (function() {
     }
   }
 
-  // === Filtres ===
   function passesFilters(pt) {
     const b = document.getElementById('filterBlock').value;
     const s = document.getElementById('filterStatus').value;
@@ -153,7 +149,6 @@ window.Markers = (function() {
     updateStatsHeader();
   }
 
-  // === Rafraîchissement ===
   function refreshMarker(marker, pt) {
     if (!marker) return;
     const status = effectiveStatus(pt);
@@ -171,7 +166,6 @@ window.Markers = (function() {
     updateStatsHeader();
   }
 
-  // === En-tête statistiques ===
   function updateStatsHeader() {
     const el = document.getElementById('statsHeader');
     if (!el) return;
@@ -183,7 +177,6 @@ window.Markers = (function() {
     el.textContent = `${visitedCount} / ${total} visités`;
   }
 
-  // === Filtre "Bloc" (peuplement dynamique) ===
   function populateBlockFilter() {
     const select = document.getElementById('filterBlock');
     if (!select) return;
@@ -196,16 +189,50 @@ window.Markers = (function() {
     });
   }
 
-  // === Initialisation ===
+  // === Icône de cluster : résumé visuel des statuts (mini-donut + total) ===
+  function buildClusterIcon(cluster) {
+    const childMarkers = cluster.getAllChildMarkers();
+    const counts = {};
+    childMarkers.forEach((m) => {
+      const pt = pointsById[m.pointId];
+      if (!pt) return;
+      const color = cfg.STATUS_COLORS[effectiveStatus(pt)] || '#95a5a6';
+      counts[color] = (counts[color] || 0) + 1;
+    });
+
+    const total = childMarkers.length;
+    const colors = Object.keys(counts);
+
+    let acc = 0;
+    const stops = colors.map((color) => {
+      const pct = (counts[color] / total) * 100;
+      const from = acc;
+      acc += pct;
+      return `${color} ${from}% ${acc}%`;
+    });
+    const gradient = stops.length
+      ? `conic-gradient(${stops.join(', ')})`
+      : '#95a5a6';
+
+    const size = total < 10 ? 38 : total < 50 ? 46 : 54;
+    const html = `
+      <div class="cluster-donut" style="width:${size}px;height:${size}px;background:${gradient}">
+        <div class="cluster-count">${total}</div>
+      </div>`;
+
+    return L.divIcon({ html, className: '', iconSize: [size, size] });
+  }
+
   function init(map) {
     mapRef = map;
-    clusterGroup = L.markerClusterGroup();
+    clusterGroup = L.markerClusterGroup({ iconCreateFunction: buildClusterIcon });
 
     DATA.forEach((pt) => {
       pointsById[pt.id] = pt;
       const status = effectiveStatus(pt);
       const color = cfg.STATUS_COLORS[status] || '#95a5a6';
       const marker = L.marker([pt.lat, pt.lon], { icon: getIcon(color, isVisited(pt.id)) });
+      marker.pointId = pt.id;
       marker.bindPopup(buildPopupContent(pt));
       marker.on('popupopen', () => {
         marker.setPopupContent(buildPopupContent(pt));
@@ -219,7 +246,6 @@ window.Markers = (function() {
     updateStatsHeader();
   }
 
-  // === Accès aux données ===
   function getAllPoints() {
     return DATA.map((pt) => Object.assign({}, pt, {
       status: effectiveStatus(pt),
@@ -229,6 +255,11 @@ window.Markers = (function() {
 
   function getMarker(id) {
     return markersById[id];
+  }
+
+  function getFilteredBounds() {
+    if (!clusterGroup || clusterGroup.getLayers().length === 0) return null;
+    return clusterGroup.getBounds();
   }
 
   return {
@@ -241,6 +272,7 @@ window.Markers = (function() {
     getIcon,
     buildPopupContent,
     passesFilters,
-    refreshMarker
+    refreshMarker,
+    getFilteredBounds
   };
 })();
