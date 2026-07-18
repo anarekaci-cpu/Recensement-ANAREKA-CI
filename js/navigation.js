@@ -6,6 +6,15 @@ window.Navigation = (function () {
   let active = false;
   let lastDeviceHeading = null;
 
+  // Recalcul automatique de l'itinéraire : on ne veut pas interroger OSRM
+  // à chaque mise à jour GPS (trop de requêtes), donc on ne recalcule que
+  // si l'utilisateur s'est assez éloigné du point de départ du dernier
+  // calcul, et pas plus souvent que toutes les RECOMPUTE_MIN_INTERVAL_MS.
+  const RECOMPUTE_MIN_INTERVAL_MS = 15000;
+  const RECOMPUTE_MIN_DISTANCE_M = 30;
+  let lastRouteOrigin = null;
+  let lastRouteComputeTime = 0;
+
   function init(mapInstance) {
     map = mapInstance;
   }
@@ -13,6 +22,8 @@ window.Navigation = (function () {
   async function startTo(point) {
     destination = point;
     active = true;
+    lastRouteOrigin = null;
+    lastRouteComputeTime = 0;
     document.getElementById("routeDestName").textContent =
       point.name || point.id;
     document.getElementById("routeBanner").style.display = "flex";
@@ -43,11 +54,35 @@ window.Navigation = (function () {
         document.getElementById(
           "routeInfo"
         ).textContent = `${dist} km · ${dur} min`;
+
+        lastRouteOrigin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        lastRouteComputeTime = Date.now();
       }
     } catch (e) {
       console.warn("Erreur de calcul d'itinéraire.", e);
       document.getElementById("routeInfo").textContent =
-        "Itinéraire indisponible";
+        "Itinéraire indisponible — nouvelle tentative au prochain déplacement";
+    }
+  }
+
+  function maybeRecomputeRoute(pos) {
+    if (!active || !destination) return;
+    const now = Date.now();
+    if (now - lastRouteComputeTime < RECOMPUTE_MIN_INTERVAL_MS) return;
+    if (!lastRouteOrigin) {
+      // Le premier calcul (au clic "Naviguer") a échoué, par ex. faute de
+      // position GPS à ce moment-là : on retente dès qu'on a une position.
+      computeRoute();
+      return;
+    }
+    const moved = window.Geolocation.distanceMeters(
+      pos.coords.latitude,
+      pos.coords.longitude,
+      lastRouteOrigin.lat,
+      lastRouteOrigin.lng
+    );
+    if (moved >= RECOMPUTE_MIN_DISTANCE_M) {
+      computeRoute();
     }
   }
 
@@ -80,9 +115,6 @@ window.Navigation = (function () {
     const compassSupported =
       window.Compass && window.Compass.isSupported() && lastDeviceHeading !== null;
 
-    // Si on connaît le cap du téléphone, la flèche pointe vers la destination
-    // quelle que soit l'orientation du téléphone. Sinon, on affiche le cap
-    // brut (Nord = 0°) comme repli, moins précis mais toujours utile.
     const rotation = compassSupported
       ? targetBearing - lastDeviceHeading
       : targetBearing;
@@ -109,15 +141,14 @@ window.Navigation = (function () {
       d
     )} m restants`;
     refreshArrowDirection(pos);
+    maybeRecomputeRoute(pos);
     if (d <= window.APP_CONFIG.ARRIVAL_RADIUS_M) {
       document.getElementById("arrivalBanner").style.display = "flex";
     }
   }
 
-  // Appelé par compass.js à chaque lecture du capteur d'orientation du téléphone.
   function updateHeading(deviceHeading) {
     lastDeviceHeading = deviceHeading;
-    // Recalcule immédiatement la flèche avec le nouveau cap, si une nav est active.
     const pos = window.Geolocation && window.Geolocation.getCurrentPos();
     if (pos) refreshArrowDirection(pos);
   }
@@ -126,6 +157,8 @@ window.Navigation = (function () {
     active = false;
     destination = null;
     lastDeviceHeading = null;
+    lastRouteOrigin = null;
+    lastRouteComputeTime = 0;
     if (routeLine) {
       map.removeLayer(routeLine);
       routeLine = null;
