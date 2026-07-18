@@ -2,14 +2,14 @@
 window.Compass = (function() {
   let compassHeading = 0;
   let supported = false;
-  
+
   function init() {
     const container = document.getElementById('compassContainer');
     const rose = document.getElementById('compassRose');
     const degree = document.getElementById('compassDegree');
-    
+
     if (!window.DeviceOrientationEvent) return;
-    
+
     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
       // iOS 13+
       document.getElementById('locateBtn').addEventListener('click', async () => {
@@ -18,7 +18,7 @@ window.Compass = (function() {
           if (perm === 'granted') {
             supported = true;
             window.addEventListener('deviceorientation', handler);
-            if (window.GeoManager && window.GeoManager.getPosition()) {
+            if (window.Geolocation && window.Geolocation.getCurrentPos()) {
               container.classList.add('visible');
             }
           }
@@ -28,7 +28,7 @@ window.Compass = (function() {
       supported = true;
       window.addEventListener('deviceorientation', handler);
     }
-    
+
     function handler(event) {
       let heading;
       if (event.webkitCompassHeading) {
@@ -36,26 +36,32 @@ window.Compass = (function() {
       } else if (event.alpha !== null) {
         heading = 360 - event.alpha;
       } else { return; }
-      
+
       compassHeading = Math.round(heading);
       rose.style.transform = `rotate(${heading}deg)`;
       degree.textContent = compassHeading + '° N';
-      
-      if (window.GeoManager && window.GeoManager.getPosition()) {
+
+      if (window.Geolocation && window.Geolocation.getCurrentPos()) {
         container.classList.add('visible');
       }
+
+      if (window.Navigation) window.Navigation.updateHeading(compassHeading);
     }
-    
+
     container.addEventListener('click', () => {
-      const pos = window.GeoManager ? window.GeoManager.getPosition() : null;
+      const pos = window.Geolocation ? window.Geolocation.getCurrentPos() : null;
       if (pos) {
-        const map = window.MapManager.getMap();
-        map.setView([pos.lat, pos.lng], Math.max(map.getZoom(), 17), { animate: true, duration: 0.5 });
+        const map = window.MapModule.getMap();
+        map.setView(
+          [pos.coords.latitude, pos.coords.longitude],
+          Math.max(map.getZoom(), 17),
+          { animate: true, duration: 0.5 }
+        );
       }
     });
   }
-  
+
   function show() { document.getElementById('compassContainer').classList.add('visible'); }
-  
+
   return { init, show, getHeading: () => compassHeading, isSupported: () => supported };
 })();
