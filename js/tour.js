@@ -1,4 +1,4 @@
-// tour.js — Panneau "Tournée optimisée"
+// tour.js — Panneau "Tournée optimisée" avec repli automatique
 window.Tour = (function () {
   let map = null;
   let tourLayer = null;
@@ -142,6 +142,8 @@ window.Tour = (function () {
       row.querySelector(".tour-row-go").addEventListener("click", (e) => {
         e.stopPropagation();
         window.Navigation.startTo(p);
+        // Replier le panneau après lancement de la navigation vers un point spécifique
+        collapse();
       });
       row.addEventListener("click", () => {
         map.setView([p.lat, p.lon], 18);
@@ -201,10 +203,11 @@ window.Tour = (function () {
       return;
     }
     const nextPoint = stops[0];
-    // Nettoie l'itinéraire précédent si nécessaire
     if (window.Navigation) {
-      window.Navigation.stop();
+      window.Navigation.stop(); // Éviter les superpositions d'itinéraires
       window.Navigation.startTo(nextPoint);
+      // Replier le panneau pour libérer la carte pendant la navigation
+      collapse();
     }
   }
 
@@ -219,9 +222,36 @@ window.Tour = (function () {
     if (window.Navigation) window.Navigation.stop();
   }
 
+  // ---- Gestion intelligente de l'affichage ----
+  function collapse() {
+    document.getElementById("tourPanel").classList.remove("open");
+  }
+
+  function expand() {
+    // Ne rouvre que si une tournée est active et qu'il reste des points
+    if (!active) return;
+    const stops = activeStops();
+    if (stops.length === 0) {
+      // Tournée terminée, on arrête tout
+      stop();
+      return;
+    }
+    document.getElementById("tourPanel").classList.add("open");
+    render(); // rafraîchit l'affichage
+  }
+
   function onVisitChanged() {
     if (active) render();
   }
 
-  return { init, start, stop, goToNext, onVisitChanged, isActive: () => active };
+  return {
+    init,
+    start,
+    stop,
+    goToNext,
+    collapse,
+    expand,
+    onVisitChanged,
+    isActive: () => active
+  };
 })();
