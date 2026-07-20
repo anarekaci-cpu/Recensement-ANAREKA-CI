@@ -1,12 +1,9 @@
 // tour.js — Panneau "Tournée optimisée"
-// Affiche la séquence de passage calculée par routing.js : liste des
-// arrêts dans l'ordre, tracé sur la carte, et bascule automatique vers le
-// prochain arrêt au fur et à mesure des visites.
 window.Tour = (function () {
   let map = null;
-  let tourLayer = null;   // polylignes + pastilles numérotées
+  let tourLayer = null;
   let active = false;
-  let currentOrder = [];  // liste ordonnée de points (objets DATA)
+  let currentOrder = [];
   let startLatLng = null;
 
   function init(mapInstance) {
@@ -19,15 +16,28 @@ window.Tour = (function () {
     return L.divIcon({ html, className: "", iconSize: [26, 26], iconAnchor: [13, 13] });
   }
 
-  function drawOnMap() {
+  // Récupère un tronçon réel via OSRM (utilise la fonction centralisée)
+  async function fetchRoadLeg(from, to) {
+    if (window.Routing && window.Routing.fetchRoute) {
+      const route = await window.Routing.fetchRoute(from, to);
+      return route ? route.geometry : null;
+    }
+    return null;
+  }
+
+  let drawToken = 0;
+  async function drawOnMap() {
     tourLayer.clearLayers();
     if (!currentOrder.length) return;
 
-    const latlngs = [startLatLng, ...currentOrder.map((p) => [p.lat, p.lon])];
-    L.polyline(latlngs, {
+    const myToken = ++drawToken;
+    const stopsLatLng = currentOrder.map((p) => [p.lat, p.lon]);
+    const waypoints = [startLatLng, ...stopsLatLng];
+
+    const provisionalLine = L.polyline(waypoints, {
       color: "#C9A84C",
       weight: 4,
-      opacity: 0.9,
+      opacity: 0.55,
       dashArray: "1,10",
       lineCap: "round"
     }).addTo(tourLayer);
@@ -44,6 +54,37 @@ window.Tour = (function () {
     });
 
     tourLayer.addTo(map);
+
+    const legPromises = [];
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      legPromises.push(fetchRoadLeg(waypoints[i], waypoints[i + 1]));
+    }
+    const legs = await Promise.all(legPromises);
+    if (myToken !== drawToken) return;
+
+    let fullPath = [];
+    let allOk = true;
+    legs.forEach((legCoords, i) => {
+      if (legCoords) {
+        fullPath = fullPath.concat(legCoords);
+      } else {
+        allOk = false;
+        fullPath.push(waypoints[i], waypoints[i + 1]);
+      }
+    });
+
+    tourLayer.removeLayer(provisionalLine);
+    L.polyline(fullPath, {
+      color: "#C9A84C",
+      weight: 4,
+      opacity: 0.9,
+      lineCap: "round",
+      lineJoin: "round"
+    }).addTo(tourLayer);
+
+    if (!allOk) {
+      console.warn("Certains tronçons du tracé de tournée sont restés en ligne droite (voirie indisponible).");
+    }
   }
 
   function fmtKm(km) {
@@ -113,7 +154,7 @@ window.Tour = (function () {
     drawOnMap();
   }
 
-  function start(points, userLatLng) {
+  async function start(points, userLatLng) {
     if (!points.length) {
       alert("Aucun point non-visité à inclure dans la tournée (vérifiez vos filtres).");
       return;
@@ -125,41 +166,59 @@ window.Tour = (function () {
     startLatLng = [userLatLng.lat, userLatLng.lng];
 
     const btn = document.getElementById("tourBtn");
-    if (btn) { btn.disabled = true; btn.textContent = "⏳ Calcul…"; }
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Calcul de l'itinéraire réel…"; }
 
-    // setTimeout pour laisser l'UI se rafraîchir avant le calcul (peut être
-    // un peu lourd sur de gros lots de points).
-    setTimeout(() => {
-      const result = window.Routing.computeOptimizedTour(userLatLng, points);
+    try {
+      const result = await window.Routing.computeOptimizedTour(userLatLng, points);
       currentOrder = result.order;
       active = true;
 
-      if (btn) { btn.disabled = false; btn.textContent = "🧭 Tournée optimisée"; }
-
-      document.getElementById("tourPanel").classList.add("open");
-      render();
-
-      if (currentOrder.length) {
-        const bounds = L.latLngBounds([startLatLng, ...currentOrder.map((p) => [p.lat, p.lon])]);
-        map.fitBounds(bounds, { padding: [50, 50] });
+      if (!result.usedRoadDistance) {
+        console.warn("Tournée calculée en distance à vol d'oiseau (voirie indisponible) — ordre approximatif.");
       }
-    }, 30);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "🧭 Tournée optimisée"; }
+    }
+
+    document.getElementById("tourPanel").classList.add("open");
+    render();
+
+    if (currentOrder.length) {
+      const bounds = L.latLngBounds([startLatLng, ...currentOrder.map((p) => [p.lat, p.lon])]);
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
   }
 
   function goToNext() {
+    if (!active) {
+      console.warn("Tour.goToNext appelée sans tournée active.");
+      return;
+    }
     const stops = activeStops();
-    if (stops.length) window.Navigation.startTo(stops[0]);
+    if (!stops.length) {
+      alert("Tous les points de la tournée ont été visités !");
+      stop();
+      return;
+    }
+    const nextPoint = stops[0];
+    // Nettoie l'itinéraire précédent si nécessaire
+    if (window.Navigation) {
+      window.Navigation.stop();
+      window.Navigation.startTo(nextPoint);
+    }
   }
 
   function stop() {
     active = false;
     currentOrder = [];
-    if (tourLayer) tourLayer.clearLayers();
-    const panel = document.getElementById("tourPanel");
-    if (panel) panel.classList.remove("open");
+    if (tourLayer) {
+      tourLayer.clearLayers();
+      map.removeLayer(tourLayer);
+    }
+    document.getElementById("tourPanel").classList.remove("open");
+    if (window.Navigation) window.Navigation.stop();
   }
 
-  // Appelé par markers.js / navigation.js quand une visite change d'état.
   function onVisitChanged() {
     if (active) render();
   }
