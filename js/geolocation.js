@@ -1,4 +1,4 @@
-// === Géolocalisation ===
+// geolocation.js — Géolocalisation et calcul du point le plus proche
 window.Geolocation = (function () {
   let currentPos = null;
   let userMarker = null;
@@ -86,9 +86,40 @@ window.Geolocation = (function () {
     }
   }
 
-  // Points de census.js utilisent "lon" (pas "lng") pour la longitude.
+  /**
+   * Trouve le point le plus proche (par la route si possible, sinon vol d'oiseau)
+   * @returns {Promise<Object|null>} promesse résolvant {point, distance} ou null
+   */
   function findNearest() {
-    if (!currentPos) return null;
+    if (!currentPos) return Promise.resolve(null);
+
+    const points = window.Markers.getAllPoints().filter((p) => !p.visited);
+    if (!points.length) return Promise.resolve(null);
+
+    // Si le service de routage est disponible, on l'utilise
+    if (window.Routing && window.Routing.findTrueNearest) {
+      const start = { lat: currentPos.coords.latitude, lon: currentPos.coords.longitude };
+      return window.Routing.findTrueNearest(start, points, 8)
+        .then(result => {
+          if (result && result.point) {
+            return {
+              point: result.point,
+              distance: result.distance, // mètres
+              usedRoad: result.usedRoad
+            };
+          }
+          // Fallback vol d'oiseau
+          return fallbackFindNearest();
+        })
+        .catch(() => fallbackFindNearest());
+    } else {
+      // Fallback si Routing non chargé
+      return Promise.resolve(fallbackFindNearest());
+    }
+  }
+
+  // Fallback immédiat (vol d'oiseau) – même code que votre ancienne version
+  function fallbackFindNearest() {
     const points = window.Markers.getAllPoints().filter((p) => !p.visited);
     let best = null;
     let bestDist = Infinity;
