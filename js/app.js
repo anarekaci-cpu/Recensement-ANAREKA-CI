@@ -50,7 +50,7 @@ async function startApp() {
   } catch (e) {
     console.error("Échec du chargement des données Supabase.", e);
     showLoadError(e);
-    return; // On ne continue pas l'initialisation sans données.
+    return;
   }
 
   await window.Storage.init();
@@ -61,6 +61,13 @@ async function startApp() {
   window.Compass.init();
   window.Geolocation.start(map);
 
+  // --- Fermeture automatique du panneau de contrôles ---
+  function closeControls() {
+    const controls = document.getElementById("controls");
+    if (controls) controls.classList.remove("open");
+  }
+
+  // --- Boutons de navigation / actions ---
   const logoutBtn = document.getElementById("logoutBtn");
   if (logoutBtn) {
     logoutBtn.onclick = async () => {
@@ -88,9 +95,10 @@ async function startApp() {
   ["filterBlock", "filterStatus", "filterVisited"].forEach((id) => {
     const el = document.getElementById(id);
     if (el)
-      el.addEventListener("change", () =>
-        window.Markers.applyFilters(currentFilters())
-      );
+      el.addEventListener("change", () => {
+        window.Markers.applyFilters(currentFilters());
+        closeControls(); // ferme le panneau après un changement de filtre
+      });
   });
 
   const searchBox = document.getElementById("searchBox");
@@ -101,7 +109,12 @@ async function startApp() {
   }
 
   const locateBtn = document.getElementById("locateBtn");
-  if (locateBtn) locateBtn.onclick = () => window.Geolocation.locateAndCenter(map);
+  if (locateBtn) {
+    locateBtn.onclick = () => {
+      window.Geolocation.locateAndCenter(map);
+      closeControls();
+    };
+  }
 
   const fitFilteredBtn = document.getElementById("fitFilteredBtn");
   if (fitFilteredBtn) {
@@ -112,10 +125,11 @@ async function startApp() {
       } else {
         alert("Aucun point ne correspond aux filtres actuels.");
       }
+      closeControls();
     };
   }
 
-  // ✅ CORRECTION : bouton "Plus proche" asynchrone
+  // --- Point le plus proche (intelligent) ---
   const nearestBtn = document.getElementById("nearestBtn");
   if (nearestBtn) {
     nearestBtn.onclick = async () => {
@@ -123,15 +137,19 @@ async function startApp() {
       if (res && res.point) {
         map.setView([res.point.lat, res.point.lon], 17);
         window.Markers.getMarker(res.point.id)?.openPopup();
+        // Optionnel : lancer automatiquement la navigation vers ce point
+        // window.Navigation.startTo(res.point);
       } else {
         alert("Aucun point non-visité trouvé, ou position inconnue.");
       }
+      closeControls();
     };
   }
 
   const fabNearest = document.getElementById("fabNearest");
   if (fabNearest) fabNearest.onclick = () => nearestBtn && nearestBtn.click();
 
+  // --- Tournée optimisée ---
   const tourBtn = document.getElementById("tourBtn");
   if (tourBtn) {
     tourBtn.onclick = () => {
@@ -140,8 +158,6 @@ async function startApp() {
         alert("Activez d'abord votre position (📍 Me localiser).");
         return;
       }
-      // On optimise sur les points actuellement filtrés et non visités,
-      // pour que la tournée corresponde exactement à ce que l'agent voit.
       const points = window.Markers.getAllPoints().filter(
         (p) => !p.visited && window.Markers.passesFilters(p)
       );
@@ -149,15 +165,28 @@ async function startApp() {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude
       });
+      closeControls();
     };
   }
 
   const tourGoNextBtn = document.getElementById("tourGoNextBtn");
-  if (tourGoNextBtn) tourGoNextBtn.onclick = () => window.Tour.goToNext();
+  if (tourGoNextBtn) {
+    tourGoNextBtn.onclick = () => {
+      window.Tour.goToNext();
+      // Le panneau de tournée reste ouvert pour continuer, mais on ferme les contrôles s'ils sont ouverts.
+      closeControls();
+    };
+  }
 
   const tourCloseBtn = document.getElementById("tourCloseBtn");
-  if (tourCloseBtn) tourCloseBtn.onclick = () => window.Tour.stop();
+  if (tourCloseBtn) {
+    tourCloseBtn.onclick = () => {
+      window.Tour.stop();
+      closeControls();
+    };
+  }
 
+  // --- Export CSV ---
   const exportBtn = document.getElementById("exportBtn");
   if (exportBtn) {
     exportBtn.onclick = () => {
@@ -180,9 +209,11 @@ async function startApp() {
       a.download = "recensement_export.csv";
       a.click();
       URL.revokeObjectURL(url);
+      closeControls();
     };
   }
 
+  // --- Réinitialisation ---
   const resetBtn = document.getElementById("resetBtn");
   if (resetBtn) {
     resetBtn.onclick = () => {
@@ -190,9 +221,11 @@ async function startApp() {
         window.Storage.reset();
         location.reload();
       }
+      closeControls();
     };
   }
 
+  // --- Navigation (itinéraire) ---
   const closeRouteBtn = document.getElementById("closeRouteBtn");
   if (closeRouteBtn) closeRouteBtn.onclick = () => window.Navigation.stop();
 
