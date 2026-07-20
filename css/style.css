@@ -205,6 +205,34 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   font-size: 14px; color: #555; z-index: 2000; transition: opacity .2s ease;
 }
 
+#loginScreen {
+  position: fixed; inset: 0; background: #1B5E20;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 3000; padding: 16px;
+}
+#loginBox {
+  background: white; border-radius: 12px; padding: 28px 24px;
+  width: 100%; max-width: 340px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
+  text-align: center;
+}
+#loginBox h1 { font-size: 18px; margin: 0 0 4px; }
+#loginBox p { font-size: 13px; color: #666; margin: 0 0 16px; }
+#loginBox input {
+  width: 100%; box-sizing: border-box; padding: 10px 12px; margin-bottom: 10px;
+  border: 1px solid #ccc; border-radius: 8px; font-size: 14px;
+}
+#loginBox button {
+  width: 100%; padding: 10px; border: none; border-radius: 8px;
+  background: #1B5E20; color: white; font-size: 14px; font-weight: 600;
+  cursor: pointer;
+}
+#loginBox button:disabled { opacity: .6; cursor: default; }
+#loginError { color: #c0392b; font-size: 12px; margin-top: 10px; min-height: 14px; }
+#logoutBtn {
+  background: none; border: none; font-size: 18px; cursor: pointer;
+  margin-right: 4px;
+}
+
 /* User dot */
 .user-dot-wrap { position: relative; }
 .user-dot-pulse {
