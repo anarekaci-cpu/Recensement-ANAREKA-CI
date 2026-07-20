@@ -1,9 +1,58 @@
 // === Point d'entrée de l'application ===
+
+// Affiche un message d'erreur clair (à la place du spinner "Chargement…")
+// quand le chargement des données Supabase échoue, avec un bouton pour
+// réessayer sans avoir à se reconnecter.
+function showLoadError(err) {
+  const loading = document.getElementById("loading");
+  if (!loading) return;
+
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const message = offline
+    ? "Pas de connexion internet. Vérifiez votre réseau puis réessayez."
+    : "Impossible de charger les données du recensement. Le serveur est peut-être temporairement indisponible.";
+
+  loading.innerHTML = "";
+  loading.style.flexDirection = "column";
+  loading.style.gap = "12px";
+  loading.style.textAlign = "center";
+  loading.style.padding = "24px";
+
+  const msgEl = document.createElement("div");
+  msgEl.textContent = "⚠️ " + message;
+  loading.appendChild(msgEl);
+
+  const retryBtn = document.createElement("button");
+  retryBtn.textContent = "🔄 Réessayer";
+  retryBtn.style.padding = "10px 18px";
+  retryBtn.style.fontSize = "14px";
+  retryBtn.style.border = "none";
+  retryBtn.style.borderRadius = "6px";
+  retryBtn.style.background = "#1B5E20";
+  retryBtn.style.color = "white";
+  retryBtn.style.cursor = "pointer";
+  retryBtn.onclick = () => {
+    loading.innerHTML = "Chargement de la carte…";
+    loading.style.display = "flex";
+    startApp();
+  };
+  loading.appendChild(retryBtn);
+
+  loading.style.display = "flex";
+}
+
 async function startApp() {
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("app").style.display = "";
 
-  await window.DataLoader.loadFromSupabase();
+  try {
+    await window.DataLoader.loadFromSupabase();
+  } catch (e) {
+    console.error("Échec du chargement des données Supabase.", e);
+    showLoadError(e);
+    return; // On ne continue pas l'initialisation sans données.
+  }
+
   await window.Storage.init();
 
   const map = window.MapModule.init();
@@ -134,16 +183,24 @@ async function startApp() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  const session = await window.Auth.getSession();
-  if (session) {
-    startApp();
-    return;
-  }
-
   const loginBtn = document.getElementById("loginBtn");
   const emailEl = document.getElementById("loginEmail");
   const passwordEl = document.getElementById("loginPassword");
   const errorEl = document.getElementById("loginError");
+
+  let session = null;
+  try {
+    session = await window.Auth.getSession();
+  } catch (e) {
+    console.error("Impossible de vérifier la session.", e);
+    errorEl.textContent =
+      "Connexion au serveur impossible. Vérifiez votre réseau puis rechargez la page.";
+  }
+
+  if (session) {
+    startApp();
+    return;
+  }
 
   async function attemptLogin() {
     errorEl.textContent = "";
