@@ -18,7 +18,18 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div id="app">
+<div id="loginScreen">
+  <div id="loginBox">
+    <h1>🗺️ Recensement ANAREKA-CI</h1>
+    <p>Connexion agent</p>
+    <input type="email" id="loginEmail" placeholder="Email" autocomplete="username">
+    <input type="password" id="loginPassword" placeholder="Mot de passe" autocomplete="current-password">
+    <button id="loginBtn">Se connecter</button>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<div id="app" style="display:none">
   <!-- En-tête -->
   <header>
     <div class="htitle">
@@ -27,6 +38,7 @@
     </div>
     <div class="right">
       <div id="syncStatus">🟡 Connexion...</div>
+      <button id="logoutBtn" aria-label="Déconnexion" title="Déconnexion">🚪</button>
       <button id="menuToggleBtn" aria-label="Filtres">☰</button>
     </div>
   </header>
@@ -139,8 +151,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
 <!-- Modules applicatifs (dans l'ordre) -->
-<script src="js/data.js"></script>
 <script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/data.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/markers.js"></script>
 <script src="js/map.js"></script>
