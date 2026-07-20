@@ -19,6 +19,15 @@ window.Navigation = (function () {
     map = mapInstance;
   }
 
+  // Construction d'URL avec proxy CORS (identique à routing.js)
+  function osrmUrl(path) {
+    const cfg = window.APP_CONFIG;
+    const base = cfg?.OSRM_URL || 'https://router.project-osrm.org';
+    const proxy = cfg?.OSRM_PROXY || '';
+    const url = `${base}/${path}`;
+    return proxy ? `${proxy}${encodeURIComponent(url)}` : url;
+  }
+
   async function startTo(point) {
     destination = point;
     active = true;
@@ -34,8 +43,12 @@ window.Navigation = (function () {
   async function computeRoute() {
     const pos = window.Geolocation.getCurrentPos();
     if (!pos || !destination) return;
-    const cfg = window.APP_CONFIG;
-    const url = `${cfg.OSRM_URL}/${pos.coords.longitude},${pos.coords.latitude};${destination.lon},${destination.lat}?overview=full&geometries=geojson`;
+
+    // Utilisation de osrmUrl() pour passer par le proxy CORS
+    const url = osrmUrl(
+      `route/v1/foot/${pos.coords.longitude},${pos.coords.latitude};${destination.lon},${destination.lat}?overview=full&geometries=geojson`
+    );
+
     try {
       const res = await fetch(url);
       const json = await res.json();
@@ -70,8 +83,6 @@ window.Navigation = (function () {
     const now = Date.now();
     if (now - lastRouteComputeTime < RECOMPUTE_MIN_INTERVAL_MS) return;
     if (!lastRouteOrigin) {
-      // Le premier calcul (au clic "Naviguer") a échoué, par ex. faute de
-      // position GPS à ce moment-là : on retente dès qu'on a une position.
       computeRoute();
       return;
     }
@@ -86,7 +97,6 @@ window.Navigation = (function () {
     }
   }
 
-  // Cap géographique (bearing) de la position courante vers la destination, en degrés (0-360, 0 = Nord)
   function bearingTo(lat1, lon1, lat2, lon2) {
     const toRad = (v) => (v * Math.PI) / 180;
     const toDeg = (v) => (v * 180) / Math.PI;
