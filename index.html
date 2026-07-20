@@ -6,12 +6,15 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#1B5E20">
+  <meta name="theme-color" content="#1a3d2b">
   <title>Recensement Bingerville — ANAREKA-CI</title>
   <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="preconnect" href="https://router.project-osrm.org">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
@@ -19,9 +22,11 @@
 </head>
 <body>
 <div id="loginScreen">
+  <div class="login-backdrop"></div>
   <div id="loginBox">
-    <h1>🗺️ Recensement ANAREKA-CI</h1>
-    <p>Connexion agent</p>
+    <div class="login-badge">🗺️</div>
+    <h1>Recensement ANAREKA-CI</h1>
+    <p>Connexion agent de terrain</p>
     <input type="email" id="loginEmail" placeholder="Email" autocomplete="username">
     <input type="password" id="loginPassword" placeholder="Mot de passe" autocomplete="current-password">
     <button id="loginBtn">Se connecter</button>
@@ -33,13 +38,18 @@
   <!-- En-tête -->
   <header>
     <div class="htitle">
-      <h1>🗺️ Recensement ANAREKA-CI</h1>
-      <div class="stats" id="statsHeader">Chargement…</div>
+      <span class="brand-mark">🗺️</span>
+      <div>
+        <h1>Recensement <span>ANAREKA-CI</span></h1>
+        <div class="stats" id="statsHeader">Chargement…</div>
+      </div>
     </div>
     <div class="right">
       <div id="syncStatus">🟡 Connexion...</div>
-      <button id="logoutBtn" aria-label="Déconnexion" title="Déconnexion">🚪</button>
-      <button id="menuToggleBtn" aria-label="Filtres">☰</button>
+      <div class="header-actions">
+        <button id="logoutBtn" aria-label="Déconnexion" title="Déconnexion">🚪</button>
+        <button id="menuToggleBtn" aria-label="Filtres">☰</button>
+      </div>
     </div>
   </header>
 
@@ -70,15 +80,18 @@
         <label>Recherche <input type="text" id="searchBox" placeholder="Nom, quartier..."></label>
       </div>
       <div class="action-row">
-        <button id="locateBtn">📍 Me localiser</button>
-        <button id="nearestBtn" disabled>🎯 Plus proche</button>
+        <button id="locateBtn" class="btn-locate">📍 Me localiser</button>
+        <button id="nearestBtn" class="btn-nearest" disabled>🎯 Plus proche</button>
       </div>
       <div class="action-row">
-        <button id="fitFilteredBtn">🔍 Vue d'ensemble filtrés</button>
+        <button id="tourBtn" class="btn-tour" disabled>🧭 Tournée optimisée</button>
       </div>
       <div class="action-row">
-        <button id="exportBtn">⬇️ Exporter CSV</button>
-        <button id="resetBtn">🗑️ Réinitialiser</button>
+        <button id="fitFilteredBtn" class="btn-overview">🔍 Vue d'ensemble filtrés</button>
+      </div>
+      <div class="action-row">
+        <button id="exportBtn" class="btn-export">⬇️ Exporter CSV</button>
+        <button id="resetBtn" class="btn-reset">🗑️ Réinitialiser</button>
       </div>
       <div id="geoStatus"></div>
     </div>
@@ -142,6 +155,21 @@
     </div>
 
     <div id="loading">Chargement de la carte…</div>
+
+    <!-- Panneau de tournée optimisée -->
+    <div id="tourPanel">
+      <div class="tour-handle"></div>
+      <div class="tour-header">
+        <div>
+          <div class="tour-title">🧭 Tournée optimisée</div>
+          <div id="tourProgress" class="tour-progress">—</div>
+        </div>
+        <button id="tourCloseBtn" aria-label="Fermer la tournée">✕</button>
+      </div>
+      <div id="tourSummary" class="tour-summary">—</div>
+      <button id="tourGoNextBtn" class="tour-go-next">▶️ Naviguer vers le prochain arrêt</button>
+      <div id="tourList" class="tour-list"></div>
+    </div>
   </div>
 </div>
 
@@ -160,6 +188,8 @@
 <script src="js/compass.js"></script>
 <script src="js/geolocation.js"></script>
 <script src="js/navigation.js"></script>
+<script src="js/routing.js"></script>
+<script src="js/tour.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
