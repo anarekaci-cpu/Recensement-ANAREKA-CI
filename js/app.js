@@ -57,6 +57,7 @@ async function startApp() {
 
   const map = window.MapModule.init();
   window.Navigation.init(map);
+  window.Tour.init(map);
   window.Compass.init();
   window.Geolocation.start(map);
 
@@ -129,6 +130,32 @@ async function startApp() {
 
   const fabNearest = document.getElementById("fabNearest");
   if (fabNearest) fabNearest.onclick = () => nearestBtn && nearestBtn.click();
+
+  const tourBtn = document.getElementById("tourBtn");
+  if (tourBtn) {
+    tourBtn.onclick = () => {
+      const pos = window.Geolocation.getCurrentPos();
+      if (!pos) {
+        alert("Activez d'abord votre position (📍 Me localiser).");
+        return;
+      }
+      // On optimise sur les points actuellement filtrés et non visités,
+      // pour que la tournée corresponde exactement à ce que l'agent voit.
+      const points = window.Markers.getAllPoints().filter(
+        (p) => !p.visited && window.Markers.passesFilters(p)
+      );
+      window.Tour.start(points, {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude
+      });
+    };
+  }
+
+  const tourGoNextBtn = document.getElementById("tourGoNextBtn");
+  if (tourGoNextBtn) tourGoNextBtn.onclick = () => window.Tour.goToNext();
+
+  const tourCloseBtn = document.getElementById("tourCloseBtn");
+  if (tourCloseBtn) tourCloseBtn.onclick = () => window.Tour.stop();
 
   const exportBtn = document.getElementById("exportBtn");
   if (exportBtn) {

@@ -52,6 +52,8 @@ window.Geolocation = (function () {
         updateUserMarker(map);
         const nearestBtn = document.getElementById("nearestBtn");
         if (nearestBtn) nearestBtn.disabled = false;
+        const tourBtn = document.getElementById("tourBtn");
+        if (tourBtn) tourBtn.disabled = false;
         const acc = Math.round(pos.coords.accuracy);
         setStatus(
           acc > ACCURACY_WARN_M

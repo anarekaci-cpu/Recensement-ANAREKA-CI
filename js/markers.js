@@ -116,6 +116,7 @@ window.Markers = (function() {
         refreshOne(pt.id);
         const marker = markersById[pt.id];
         if (marker) marker.openPopup();
+        if (window.Tour) window.Tour.onVisitChanged();
       });
     }
   }

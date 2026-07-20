@@ -173,6 +173,7 @@ window.Navigation = (function () {
     const dest = destination;
     window.Storage.setVisited(dest.id, true, dest.status).then(() => {
       window.Markers.refreshOne(dest.id);
+      if (window.Tour) window.Tour.onVisitChanged();
       stop();
     });
   }
