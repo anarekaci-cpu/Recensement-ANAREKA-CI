@@ -6,10 +6,6 @@ window.Navigation = (function () {
   let active = false;
   let lastDeviceHeading = null;
 
-  // Recalcul automatique de l'itinéraire : on ne veut pas interroger OSRM
-  // à chaque mise à jour GPS (trop de requêtes), donc on ne recalcule que
-  // si l'utilisateur s'est assez éloigné du point de départ du dernier
-  // calcul, et pas plus souvent que toutes les RECOMPUTE_MIN_INTERVAL_MS.
   const RECOMPUTE_MIN_INTERVAL_MS = 15000;
   const RECOMPUTE_MIN_DISTANCE_M = 30;
   let lastRouteOrigin = null;
@@ -19,7 +15,7 @@ window.Navigation = (function () {
     map = mapInstance;
   }
 
-  // Construction d'URL avec proxy CORS (identique à routing.js)
+  // Construction d'URL avec proxy CORS
   function osrmUrl(path) {
     const cfg = window.APP_CONFIG;
     const base = cfg?.OSRM_URL || 'https://router.project-osrm.org';
@@ -33,8 +29,7 @@ window.Navigation = (function () {
     active = true;
     lastRouteOrigin = null;
     lastRouteComputeTime = 0;
-    document.getElementById("routeDestName").textContent =
-      point.name || point.id;
+    document.getElementById("routeDestName").textContent = point.name || point.id;
     document.getElementById("routeBanner").style.display = "flex";
     document.getElementById("navPanel").style.display = "flex";
     await computeRoute();
@@ -44,7 +39,6 @@ window.Navigation = (function () {
     const pos = window.Geolocation.getCurrentPos();
     if (!pos || !destination) return;
 
-    // Utilisation de osrmUrl() pour passer par le proxy CORS
     const url = osrmUrl(
       `route/v1/foot/${pos.coords.longitude},${pos.coords.latitude};${destination.lon},${destination.lat}?overview=full&geometries=geojson`
     );
@@ -53,28 +47,20 @@ window.Navigation = (function () {
       const res = await fetch(url);
       const json = await res.json();
       if (json.routes && json.routes[0]) {
-        const coords = json.routes[0].geometry.coordinates.map((c) => [
-          c[1],
-          c[0]
-        ]);
+        const coords = json.routes[0].geometry.coordinates.map((c) => [c[1], c[0]]);
         if (routeLine) map.removeLayer(routeLine);
-        routeLine = L.polyline(coords, { color: "#1B5E20", weight: 5 }).addTo(
-          map
-        );
+        routeLine = L.polyline(coords, { color: "#1B5E20", weight: 5 }).addTo(map);
         map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
         const dist = (json.routes[0].distance / 1000).toFixed(2);
         const dur = Math.round(json.routes[0].duration / 60);
-        document.getElementById(
-          "routeInfo"
-        ).textContent = `${dist} km · ${dur} min`;
+        document.getElementById("routeInfo").textContent = `${dist} km · ${dur} min`;
 
         lastRouteOrigin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         lastRouteComputeTime = Date.now();
       }
     } catch (e) {
       console.warn("Erreur de calcul d'itinéraire.", e);
-      document.getElementById("routeInfo").textContent =
-        "Itinéraire indisponible — nouvelle tentative au prochain déplacement";
+      document.getElementById("routeInfo").textContent = "Itinéraire indisponible — nouvelle tentative au prochain déplacement";
     }
   }
 
@@ -121,16 +107,10 @@ window.Navigation = (function () {
       destination.lat,
       destination.lon
     );
-
     const compassSupported =
       window.Compass && window.Compass.isSupported() && lastDeviceHeading !== null;
-
-    const rotation = compassSupported
-      ? targetBearing - lastDeviceHeading
-      : targetBearing;
-
+    const rotation = compassSupported ? targetBearing - lastDeviceHeading : targetBearing;
     setArrowRotation(rotation);
-
     const navSub = document.getElementById("navSub");
     if (navSub) {
       navSub.textContent = compassSupported
@@ -147,9 +127,7 @@ window.Navigation = (function () {
       destination.lat,
       destination.lon
     );
-    document.getElementById("navInstruction").textContent = `${Math.round(
-      d
-    )} m restants`;
+    document.getElementById("navInstruction").textContent = `${Math.round(d)} m restants`;
     refreshArrowDirection(pos);
     maybeRecomputeRoute(pos);
     if (d <= window.APP_CONFIG.ARRIVAL_RADIUS_M) {
@@ -178,12 +156,17 @@ window.Navigation = (function () {
     document.getElementById("arrivalBanner").style.display = "none";
   }
 
+  // Marque l'arrivée et rouvre automatiquement le panneau de tournée
   function markArrivedVisited() {
     if (!destination) return;
     const dest = destination;
     window.Storage.setVisited(dest.id, true, dest.status).then(() => {
       window.Markers.refreshOne(dest.id);
-      if (window.Tour) window.Tour.onVisitChanged();
+      if (window.Tour) {
+        window.Tour.onVisitChanged(); // Met à jour la liste de la tournée
+        // Rouvrir le panneau de tournée pour la suite
+        window.Tour.expand();
+      }
       stop();
     });
   }
