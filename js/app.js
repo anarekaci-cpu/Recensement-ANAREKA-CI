@@ -3,8 +3,8 @@ async function startApp() {
   document.getElementById("loginScreen").style.display = "none";
   document.getElementById("app").style.display = "";
 
-  await window.Storage.init();
   await window.DataLoader.loadFromSupabase();
+  await window.Storage.init();
 
   const map = window.MapModule.init();
   window.Navigation.init(map);
