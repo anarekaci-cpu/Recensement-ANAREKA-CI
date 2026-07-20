@@ -115,13 +115,14 @@ async function startApp() {
     };
   }
 
+  // ✅ CORRECTION : bouton "Plus proche" asynchrone
   const nearestBtn = document.getElementById("nearestBtn");
   if (nearestBtn) {
-    nearestBtn.onclick = () => {
-      const res = window.Geolocation.findNearest();
-      if (res) {
+    nearestBtn.onclick = async () => {
+      const res = await window.Geolocation.findNearest();
+      if (res && res.point) {
         map.setView([res.point.lat, res.point.lon], 17);
-        window.Markers.getMarker(res.point.id).openPopup();
+        window.Markers.getMarker(res.point.id)?.openPopup();
       } else {
         alert("Aucun point non-visité trouvé, ou position inconnue.");
       }
