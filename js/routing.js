@@ -1,15 +1,4 @@
-// routing.js — Moteur d'itinéraire intelligent
-//
-// Deux modes complémentaires :
-//  1) "Plus proche" : combine vol d'oiseau + OSRM pour trouver le point
-//     non‑visité réellement le plus proche à pied (pas celui qui paraît
-//     proche à vol d'oiseau mais qui oblige à un long détour).
-//  2) "Tournée optimisée" : calcule l'ordre de passage sur tous les points
-//     non‑visités en minimisant la distance totale. Utilise en priorité
-//     les distances réelles (OSRM) si disponibles, avec fallback local
-//     (vol d'oiseau). Algorithme d'optimisation : construction gloutonne
-//     puis 2-opt + Or-opt (même algorithme que votre version actuelle).
-
+// routing.js — Moteur d'itinéraire intelligent (respect des blocs)
 window.Routing = (function () {
   const OSRM_BASE = window.APP_CONFIG?.OSRM_URL || 'https://router.project-osrm.org';
   const OSRM_PROXY = window.APP_CONFIG?.OSRM_PROXY || '';
@@ -20,31 +9,21 @@ window.Routing = (function () {
   function haversineKm(lat1, lon1, lat2, lon2) {
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  // Distance à vol d'oiseau (km) entre deux objets {lat, lon}
   function pointDist(a, b) {
     return haversineKm(a.lat, a.lon, b.lat, b.lon);
   }
 
-  // Construction d'URL avec proxy CORS si configuré
   function osrmUrl(path) {
     const url = `${OSRM_BASE}/${path}`;
     return OSRM_PROXY ? `${OSRM_PROXY}${encodeURIComponent(url)}` : url;
   }
 
-  // ================== OSRM (temps réel) ==================
-
-  /**
-   * Matrice de distances piétonnes via OSRM.
-   * @param {Object} origin - {lat, lon}
-   * @param {Object[]} destinations - [{lat, lon}, ...]
-   * @returns {Promise<number[][]|null>} distances en mètres, ou null si indisponible
-   */
+  // ================== OSRM ==================
   async function fetchWalkingMatrix(origin, destinations) {
     if (!destinations.length) return null;
     const coords = `${origin.lon},${origin.lat};` + destinations.map(d => `${d.lon},${d.lat}`).join(';');
@@ -55,17 +34,11 @@ window.Routing = (function () {
       const json = await res.json();
       return json.distances;
     } catch (e) {
-      console.warn('Matrice OSRM indisponible, utilisation du vol d\'oiseau en fallback.', e.message);
+      console.warn('Matrice OSRM indisponible, fallback vol d\'oiseau.', e);
       return null;
     }
   }
 
-  /**
-   * Récupère l'itinéraire détaillé (géométrie, distance, durée).
-   * @param {Array} fromLatLng - [lat, lon]
-   * @param {Array} toLatLng - [lat, lon]
-   * @returns {Promise<Object|null>} { geometry, distance, duration, steps }
-   */
   async function fetchRoute(fromLatLng, toLatLng) {
     const url = osrmUrl(`route/v1/foot/${fromLatLng[1]},${fromLatLng[0]};${toLatLng[1]},${toLatLng[0]}?overview=full&geometries=geojson&steps=true`);
     try {
@@ -81,70 +54,37 @@ window.Routing = (function () {
         };
       }
     } catch (e) {
-      console.warn('Route OSRM indisponible.', e.message);
+      console.warn('Route OSRM indisponible.', e);
     }
     return null;
   }
 
-  // ================== Point le plus proche intelligent ==================
-
-  /**
-   * Trouve le vrai point le plus proche par la route.
-   * 1. Pré‑sélectionne les N plus proches à vol d'oiseau.
-   * 2. Demande la matrice OSRM pour ces candidats.
-   * 3. Retient celui qui minimise la distance piétonne réelle.
-   * Fallback silencieux sur le vol d'oiseau si OSRM injoignable.
-   *
-   * @param {Object} userLatLng - {lat, lon}
-   * @param {Object[]} candidates - [{lat, lon, ...}]
-   * @param {number} maxCandidates - nombre max examiné via OSRM (défaut 8)
-   * @returns {Promise<Object>} { point, distance (m), usedRoad (bool) }
-   */
+  // ================== Point le plus proche ==================
   async function findTrueNearest(userLatLng, candidates, maxCandidates = 8) {
     if (!candidates.length) return null;
-
-    const withDist = candidates.map(p => ({
-      point: p,
-      crowDist: pointDist(userLatLng, p) // km
-    }));
+    const withDist = candidates.map(p => ({ point: p, crowDist: pointDist(userLatLng, p) }));
     withDist.sort((a, b) => a.crowDist - b.crowDist);
     const top = withDist.slice(0, maxCandidates);
 
     const matrix = await fetchWalkingMatrix(userLatLng, top.map(c => c.point));
     if (!matrix || !matrix[0]) {
-      return {
-        point: top[0].point,
-        distance: top[0].crowDist * 1000,
-        usedRoad: false
-      };
+      return { point: top[0].point, distance: top[0].crowDist * 1000, usedRoad: false };
     }
-
-    let best = top[0].point;
-    let bestDist = Infinity;
+    let best = top[0].point, bestDist = Infinity;
     for (let i = 0; i < top.length; i++) {
-      const roadDist = matrix[0][i + 1]; // index 0 = origine vers elle‑même
-      if (roadDist !== null && roadDist < bestDist) {
-        bestDist = roadDist;
-        best = top[i].point;
-      }
+      const d = matrix[0][i + 1];
+      if (d !== null && d < bestDist) { bestDist = d; best = top[i].point; }
     }
-    return {
-      point: best,
-      distance: bestDist < Infinity ? bestDist : top[0].crowDist * 1000,
-      usedRoad: true
-    };
+    return { point: best, distance: bestDist < Infinity ? bestDist : top[0].crowDist * 1000, usedRoad: true };
   }
 
-  // ================== Tournée optimisée ==================
-
-  // Construction gloutonne (plus proche voisin) – conservée
+  // ================== Algorithmes d'optimisation (conservés) ==================
   function nearestNeighborOrder(start, points) {
     const remaining = points.slice();
     const order = [];
     let current = start;
     while (remaining.length) {
-      let bestIdx = 0;
-      let bestDist = Infinity;
+      let bestIdx = 0, bestDist = Infinity;
       for (let i = 0; i < remaining.length; i++) {
         const d = pointDist(current, remaining[i]);
         if (d < bestDist) { bestDist = d; bestIdx = i; }
@@ -156,17 +96,6 @@ window.Routing = (function () {
     return order;
   }
 
-  function tourLength(start, order) {
-    let total = 0;
-    let prev = start;
-    for (const p of order) {
-      total += pointDist(prev, p);
-      prev = p;
-    }
-    return total;
-  }
-
-  // 2‑opt – conservé
   function twoOpt(start, order, deadline) {
     let improved = true;
     const nodes = [start, ...order];
@@ -181,10 +110,7 @@ window.Routing = (function () {
           const after = pointDist(a, c) + (d ? pointDist(b, d) : 0);
           if (after + 1e-9 < before) {
             let lo = i, hi = k;
-            while (lo < hi) {
-              const tmp = nodes[lo]; nodes[lo] = nodes[hi]; nodes[hi] = tmp;
-              lo++; hi--;
-            }
+            while (lo < hi) { const tmp = nodes[lo]; nodes[lo] = nodes[hi]; nodes[hi] = tmp; lo++; hi--; }
             improved = true;
           }
         }
@@ -193,7 +119,6 @@ window.Routing = (function () {
     return nodes.slice(1);
   }
 
-  // Or‑opt – conservé
   function orOpt(start, order, deadline) {
     let improved = true;
     let nodes = order.slice();
@@ -204,10 +129,7 @@ window.Routing = (function () {
         const p = nodes[i];
         const prev = i === 0 ? start : nodes[i - 1];
         const next = nodes[i + 1] || null;
-        const removalGain =
-          pointDist(prev, p) + (next ? pointDist(p, next) : 0) -
-          (next ? pointDist(prev, next) : 0);
-
+        const removalGain = pointDist(prev, p) + (next ? pointDist(p, next) : 0) - (next ? pointDist(prev, next) : 0);
         let bestJ = -1, bestDelta = -1e-9;
         for (let j = 0; j < nodes.length; j++) {
           if (j === i || j === i - 1) continue;
@@ -229,14 +151,13 @@ window.Routing = (function () {
     return nodes;
   }
 
-  // Versions des algos avec fonction de distance personnalisée
+  // --- Versions avec fonction de distance personnalisée ---
   function nearestNeighborOrderWithDist(start, points, distFunc) {
     const remaining = points.slice();
     const order = [];
     let current = start;
     while (remaining.length) {
-      let bestIdx = 0;
-      let bestDist = Infinity;
+      let bestIdx = 0, bestDist = Infinity;
       for (let i = 0; i < remaining.length; i++) {
         const d = distFunc(current, remaining[i]);
         if (d < bestDist) { bestDist = d; bestIdx = i; }
@@ -262,10 +183,7 @@ window.Routing = (function () {
           const after = distFunc(a, c) + (d ? distFunc(b, d) : 0);
           if (after + 1e-9 < before) {
             let lo = i, hi = k;
-            while (lo < hi) {
-              const tmp = nodes[lo]; nodes[lo] = nodes[hi]; nodes[hi] = tmp;
-              lo++; hi--;
-            }
+            while (lo < hi) { const tmp = nodes[lo]; nodes[lo] = nodes[hi]; nodes[hi] = tmp; lo++; hi--; }
             improved = true;
           }
         }
@@ -284,10 +202,7 @@ window.Routing = (function () {
         const p = nodes[i];
         const prev = i === 0 ? start : nodes[i - 1];
         const next = nodes[i + 1] || null;
-        const removalGain =
-          distFunc(prev, p) + (next ? distFunc(p, next) : 0) -
-          (next ? distFunc(prev, next) : 0);
-
+        const removalGain = distFunc(prev, p) + (next ? distFunc(p, next) : 0) - (next ? distFunc(prev, next) : 0);
         let bestJ = -1, bestDelta = -1e-9;
         for (let j = 0; j < nodes.length; j++) {
           if (j === i || j === i - 1) continue;
@@ -309,73 +224,173 @@ window.Routing = (function () {
     return nodes;
   }
 
+  // ================== Tournée optimisée avec respect des blocs ==================
   /**
-   * Tournée optimisée (appelée par tour.js et autres).
-   * Désormais, elle accepte en priorité les distances réelles via OSRM.
-   * Si OSRM répond, on exécute l'optimisation sur la matrice réelle.
-   * Sinon, fallback complet en vol d'oiseau (votre algorithme actuel).
-   *
-   * @param {Object} startLatLng - {lat, lng} ou {lat, lon}
-   * @param {Object[]} points - tableau de points avec .lat, .lon
-   * @param {Object} opts - options { timeBudgetMs, maxPoints }
+   * Calcule une tournée optimisée en regroupant les points par bloc.
+   * @param {Object} startLatLng - position de départ {lat, lng}
+   * @param {Object[]} points - tableau de points avec .lat, .lon, .block
+   * @param {Object} opts - options { timeBudgetMs, maxPoints, respectBlocks }
    * @returns {Promise<Object>} { order, legs, totalKm, etaMin, usedRoadDistance }
    */
   async function computeOptimizedTour(startLatLng, points, opts = {}) {
     const timeBudgetMs = opts.timeBudgetMs || 900;
     const maxPoints = opts.maxPoints || 25;
+    const respectBlocks = opts.respectBlocks !== undefined ? opts.respectBlocks : true; // activé par défaut
 
     if (!points.length) return { order: [], legs: [], totalKm: 0, etaMin: 0, usedRoadDistance: false };
 
     const start = { lat: startLatLng.lat, lon: startLatLng.lng ?? startLatLng.lon };
-
-    // Limite le nombre de points à optimiser (comportement actuel)
     let pointsToOptimize = points;
-    if (points.length > maxPoints) {
-      const withDist = points.map(p => ({ point: p, dist: pointDist(start, p) }));
+
+    // Limite le nombre total de points (inchangé)
+    if (pointsToOptimize.length > maxPoints) {
+      const withDist = pointsToOptimize.map(p => ({ point: p, dist: pointDist(start, p) }));
       withDist.sort((a, b) => a.dist - b.dist);
       pointsToOptimize = withDist.slice(0, maxPoints).map(d => d.point);
     }
 
-    // Essaie d'obtenir la matrice réelle
-    const matrix = await fetchWalkingMatrix(start, pointsToOptimize);
-    let order;
-    let usedRoadDistance = false;
+    // Si pas de respect des blocs ou un seul bloc, comportement classique
+    const blocks = new Set(pointsToOptimize.map(p => p.block));
+    if (!respectBlocks || blocks.size <= 1) {
+      return await classicOptimizedTour(start, pointsToOptimize, timeBudgetMs);
+    }
 
-    if (matrix && matrix[0]) {
-      // Utilise les distances réelles pour l'optimisation
-      const pointsCopy = pointsToOptimize.slice();
-      const realDist = (a, b) => {
-        const idxA = a === start ? -1 : pointsCopy.indexOf(a);
-        const idxB = b === start ? -1 : pointsCopy.indexOf(b);
-        if (idxA === -1 && idxB === -1) return pointDist(a, b);
-        const row = idxA === -1 ? 0 : idxA + 1;
-        const col = idxB === -1 ? 0 : idxB + 1;
-        if (row < matrix.length && col < matrix[0].length && matrix[row][col] != null) {
-          return matrix[row][col] / 1000; // m -> km
-        }
-        return pointDist(a, b);
-      };
+    // --- Regroupement par bloc ---
+    const grouped = {};
+    pointsToOptimize.forEach(p => {
+      const b = p.block;
+      if (!grouped[b]) grouped[b] = [];
+      grouped[b].push(p);
+    });
 
-      order = nearestNeighborOrderWithDist(start, pointsToOptimize, realDist);
-      const deadline = Date.now() + timeBudgetMs;
-      order = twoOptWithDist(start, order, realDist, deadline);
-      order = orOptWithDist(start, order, realDist, Date.now() + Math.min(300, Math.max(0, deadline - Date.now())));
-      usedRoadDistance = true;
-    } else {
-      // Fallback vol d'oiseau (comportement d'origine)
-      order = nearestNeighborOrder(start, pointsToOptimize);
-      const deadline = Date.now() + timeBudgetMs;
-      order = twoOpt(start, order, deadline);
-      order = orOpt(start, order, Date.now() + Math.min(300, Math.max(0, deadline - Date.now())));
+    // Calcul des centroïdes des blocs
+    const centroids = {};
+    for (const b in grouped) {
+      const pts = grouped[b];
+      const avgLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
+      const avgLon = pts.reduce((s, p) => s + p.lon, 0) / pts.length;
+      centroids[b] = { lat: avgLat, lon: avgLon, block: b };
+    }
+
+    // Ordonnancement des blocs (TSP glouton sur les centroïdes)
+    const blockOrder = [];
+    const remainingBlocks = Object.keys(grouped);
+    let currentPos = start;
+    while (remainingBlocks.length) {
+      let nearestBlock = remainingBlocks[0];
+      let nearestDist = Infinity;
+      for (const b of remainingBlocks) {
+        const d = pointDist(currentPos, centroids[b]);
+        if (d < nearestDist) { nearestDist = d; nearestBlock = b; }
+      }
+      blockOrder.push(nearestBlock);
+      currentPos = centroids[nearestBlock];
+      remainingBlocks.splice(remainingBlocks.indexOf(nearestBlock), 1);
+    }
+
+    // Optimisation intra‑bloc et assemblage
+    const fullOrder = [];
+    let prevEndPoint = start;
+    let usedRoadDistance = true; // sera mis à false si une matrice échoue
+
+    for (const blockId of blockOrder) {
+      const blockPoints = grouped[blockId];
+      if (!blockPoints.length) continue;
+
+      // Point de départ pour ce bloc : soit position de l'agent (premier bloc), soit dernier point du bloc précédent
+      const blockStart = prevEndPoint;
+
+      // Essaie d'obtenir la matrice réelle pour ce bloc (depuis blockStart vers les points du bloc)
+      let orderBlock, realDistUsed = false;
+      const matrix = await fetchWalkingMatrix(blockStart, blockPoints);
+
+      if (matrix && matrix[0]) {
+        const copy = blockPoints.slice();
+        const realDist = (a, b) => {
+          if (a === blockStart && b === blockStart) return 0;
+          const idxA = a === blockStart ? -1 : copy.indexOf(a);
+          const idxB = b === blockStart ? -1 : copy.indexOf(b);
+          if (idxA === -1 && idxB === -1) return pointDist(a, b);
+          const row = idxA === -1 ? 0 : idxA + 1;
+          const col = idxB === -1 ? 0 : idxB + 1;
+          if (row < matrix.length && col < matrix[0].length && matrix[row][col] != null) {
+            return matrix[row][col] / 1000;
+          }
+          return pointDist(a, b);
+        };
+        orderBlock = nearestNeighborOrderWithDist(blockStart, blockPoints, realDist);
+        const deadline = Date.now() + timeBudgetMs;
+        orderBlock = twoOptWithDist(blockStart, orderBlock, realDist, deadline);
+        orderBlock = orOptWithDist(blockStart, orderBlock, realDist, Date.now() + Math.min(300, deadline - Date.now()));
+        realDistUsed = true;
+      } else {
+        // Fallback vol d'oiseau
+        orderBlock = nearestNeighborOrder(blockStart, blockPoints);
+        const deadline = Date.now() + timeBudgetMs;
+        orderBlock = twoOpt(blockStart, orderBlock, deadline);
+        orderBlock = orOpt(blockStart, orderBlock, Date.now() + Math.min(300, deadline - Date.now()));
+        usedRoadDistance = false; // globalement on n'a pas utilisé la route pour ce bloc
+      }
+
+      // Ajoute au parcours complet
+      fullOrder.push(...orderBlock);
+      // Met à jour le point de départ pour le prochain bloc
+      prevEndPoint = orderBlock.length ? orderBlock[orderBlock.length - 1] : blockStart;
     }
 
     // Construction des legs
     const legs = [];
     let prev = start;
     let totalKm = 0;
+    // Pour les distances, on utilise la même logique que précédemment (on peut réutiliser la dernière matrice, mais pour simplifier on utilise pointDist)
+    fullOrder.forEach(p => {
+      const d = pointDist(prev, p);
+      totalKm += d;
+      legs.push({ point: p, distKm: d });
+      prev = p;
+    });
+    const etaMin = Math.round((totalKm / 4.2) * 60);
+
+    return { order: fullOrder, legs, totalKm, etaMin, usedRoadDistance };
+  }
+
+  // Tournée classique (sans blocs) – utilisée comme fallback ou si un seul bloc
+  async function classicOptimizedTour(start, points, timeBudgetMs) {
+    const matrix = await fetchWalkingMatrix(start, points);
+    let order, usedRoadDistance = false;
+
+    if (matrix && matrix[0]) {
+      const pointsCopy = points.slice();
+      const realDist = (a, b) => {
+        if (a === start && b === start) return 0;
+        const idxA = a === start ? -1 : pointsCopy.indexOf(a);
+        const idxB = b === start ? -1 : pointsCopy.indexOf(b);
+        if (idxA === -1 && idxB === -1) return pointDist(a, b);
+        const row = idxA === -1 ? 0 : idxA + 1;
+        const col = idxB === -1 ? 0 : idxB + 1;
+        if (row < matrix.length && col < matrix[0].length && matrix[row][col] != null) {
+          return matrix[row][col] / 1000;
+        }
+        return pointDist(a, b);
+      };
+      order = nearestNeighborOrderWithDist(start, points, realDist);
+      const deadline = Date.now() + timeBudgetMs;
+      order = twoOptWithDist(start, order, realDist, deadline);
+      order = orOptWithDist(start, order, realDist, Date.now() + Math.min(300, deadline - Date.now()));
+      usedRoadDistance = true;
+    } else {
+      order = nearestNeighborOrder(start, points);
+      const deadline = Date.now() + timeBudgetMs;
+      order = twoOpt(start, order, deadline);
+      order = orOpt(start, order, Date.now() + Math.min(300, deadline - Date.now()));
+    }
+
+    const legs = [];
+    let prev = start;
+    let totalKm = 0;
     const distFunc = usedRoadDistance ? (a, b) => {
-      const idxA = a === start ? -1 : pointsToOptimize.indexOf(a);
-      const idxB = b === start ? -1 : pointsToOptimize.indexOf(b);
+      const idxA = a === start ? -1 : points.indexOf(a);
+      const idxB = b === start ? -1 : points.indexOf(b);
       if (idxA === -1 && idxB === -1) return pointDist(a, b);
       const row = idxA === -1 ? 0 : idxA + 1;
       const col = idxB === -1 ? 0 : idxB + 1;
@@ -392,7 +407,6 @@ window.Routing = (function () {
       prev = p;
     });
     const etaMin = Math.round((totalKm / 4.2) * 60);
-
     return { order, legs, totalKm, etaMin, usedRoadDistance };
   }
 
@@ -400,7 +414,12 @@ window.Routing = (function () {
   return {
     haversineKm,
     pointDist,
-    tourLength,
+    tourLength: (start, order) => {
+      let total = 0;
+      let prev = start;
+      for (const p of order) { total += pointDist(prev, p); prev = p; }
+      return total;
+    },
     fetchWalkingMatrix,
     fetchRoute,
     fetchRoadLeg: fetchRoute,
