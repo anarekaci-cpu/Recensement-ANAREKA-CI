@@ -10,7 +10,10 @@ window.APP_CONFIG = {
   MAP_ZOOM: 13,
 
   // --- Itinéraire (OSRM public) ---
-  OSRM_URL: "https://router.project-osrm.org/route/v1/foot",
+  // L'URL de base doit pointer vers la racine de l'API, sans chemin supplémentaire.
+  OSRM_URL: "https://router.project-osrm.org",
+  // Proxy CORS gratuit pour contourner les restrictions cross-origin
+  OSRM_PROXY: "https://corsproxy.io/?",
 
   // --- Couleurs par statut (doivent correspondre exactement aux valeurs de data.js) ---
   STATUS_COLORS: {
