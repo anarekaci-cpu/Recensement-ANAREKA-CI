@@ -3,6 +3,8 @@
    Identité : forêt profonde + or attiéké, sur une base crème.
    Style : glassmorphique, typographie Outfit, coins généreux,
    micro-interactions douces. Pensé mobile-first (agents terrain).
+
+   ✅ Améliorations tactiles ajoutées (16px / 44px / scroll fluide)
    ========================================================= */
 
 :root {
@@ -91,6 +93,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   width: 34px; height: 34px; border-radius: 10px; font-size: 15px;
   display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
   transition: background .15s ease, transform .1s ease;
+  /* ✅ Taille tactile minimale */
+  min-width: 44px; min-height: 44px;
 }
 #menuToggleBtn:active, #logoutBtn:active { transform: scale(0.94); background: rgba(255,255,255,0.24); }
 
@@ -109,6 +113,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   padding: 10px 10px; font-size: 14px; border: 1.5px solid rgba(23,36,28,0.12);
   border-radius: var(--radius-sm); width: 100%; background: white; color: var(--ink);
   font-family: inherit; transition: border-color .15s ease;
+  /* ✅ Évite le zoom iOS */
+  font-size: 16px;
 }
 #controls select:focus, #controls input:focus { outline: none; border-color: var(--gold-500); }
 
@@ -118,6 +124,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   font-size: 12.5px; font-weight: 700; cursor: pointer; color: white;
   transition: transform .12s ease, box-shadow .15s ease, opacity .15s ease;
   box-shadow: var(--shadow-1); letter-spacing: 0.1px;
+  /* ✅ Taille tactile */
+  min-height: 44px;
 }
 .action-row button:active { transform: scale(0.97); }
 .btn-locate { background: linear-gradient(135deg, var(--bleu), #1f52c9); }
@@ -160,6 +168,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   border-radius: 30px; padding: 14px 20px; font-size: 13.5px; font-weight: 800;
   box-shadow: 0 6px 18px rgba(201,168,76,0.5); display: none; align-items: center; gap: 6px; cursor: pointer;
   letter-spacing: 0.2px;
+  /* ✅ Taille tactile */
+  min-height: 44px;
 }
 #fabNearest.show { display: flex; }
 #fabNearest:active { transform: scale(0.96); }
@@ -177,6 +187,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
 #routeBanner button, #arrivalBanner button {
   background: rgba(23,36,28,0.06); border: none; border-radius: 8px; padding: 6px 10px;
   font-size: 11px; cursor: pointer; font-weight: 600;
+  /* ✅ Taille tactile */
+  min-height: 44px; min-width: 44px;
 }
 #arrivalBanner { top: 70px; flex-direction: column; text-align: center; }
 #arrivalBanner.show { display: flex; }
@@ -263,6 +275,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   padding: 11px 6px; border: none; border-radius: var(--radius-sm); font-size: 13px; font-weight: 700;
   cursor: pointer; color: white; flex: 1; text-align: center; text-decoration: none;
   display: flex; align-items: center; justify-content: center; gap: 5px; transition: opacity 0.2s, transform .1s;
+  /* ✅ Taille tactile */
+  min-height: 44px;
 }
 .visit-btn:active, .go-btn:active { transform: scale(0.97); }
 .btn-visit { background: linear-gradient(135deg, var(--forest-600), var(--forest-500)); }
@@ -289,6 +303,9 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   transform: translateY(100%); transition: transform .32s cubic-bezier(.32,.72,0,1);
   max-height: 62vh; display: flex; flex-direction: column;
   padding-bottom: var(--safe-b);
+  /* ✅ Scroll fluide */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 #tourPanel.open { transform: translateY(0); }
 .tour-handle { width: 40px; height: 4px; background: rgba(23,36,28,0.18); border-radius: 4px; margin: 10px auto 4px; flex-shrink: 0; }
@@ -302,6 +319,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   background: linear-gradient(135deg, var(--forest-700), var(--forest-500)); color: white;
   font-weight: 800; font-size: 13.5px; cursor: pointer; flex-shrink: 0; box-shadow: var(--shadow-1);
   transition: transform .1s ease;
+  /* ✅ Taille tactile */
+  min-height: 44px;
 }
 .tour-go-next:active { transform: scale(0.98); }
 .tour-go-next:disabled { background: #d8d3c4; color: #8b8677; cursor: not-allowed; }
@@ -365,6 +384,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   width: 100%; box-sizing: border-box; padding: 12px 14px; margin-bottom: 10px;
   border: 1.5px solid rgba(23,36,28,0.14); border-radius: var(--radius-sm); font-size: 14px;
   font-family: inherit; background: white; transition: border-color .15s ease;
+  /* ✅ Évite le zoom iOS */
+  font-size: 16px;
 }
 #loginBox input:focus { outline: none; border-color: var(--gold-500); }
 #loginBox button {
@@ -372,6 +393,8 @@ header .right { display: flex; flex-direction: column; align-items: flex-end; ga
   background: linear-gradient(135deg, var(--forest-700), var(--forest-500)); color: white;
   font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow-1);
   transition: transform .1s ease;
+  /* ✅ Taille tactile */
+  min-height: 44px;
 }
 #loginBox button:active { transform: scale(0.98); }
 #loginBox button:disabled { opacity: .6; cursor: default; }
