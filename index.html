@@ -6,9 +6,12 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ANAREKA-CI">
   <meta name="theme-color" content="#1a3d2b">
+  <meta name="HandheldFriendly" content="true">
   <title>Recensement Bingerville — ANAREKA-CI</title>
   <link rel="icon" href="data:,">
+  <link rel="manifest" href="manifest.json">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="preconnect" href="https://router.project-osrm.org">
@@ -35,7 +38,6 @@
 </div>
 
 <div id="app" style="display:none">
-  <!-- En-tête -->
   <header>
     <div class="htitle">
       <span class="brand-mark">🗺️</span>
@@ -53,7 +55,6 @@
     </div>
   </header>
 
-  <!-- Panneau de contrôles -->
   <div id="controls">
     <div id="controlsInner">
       <div class="row2">
@@ -97,11 +98,8 @@
     </div>
   </div>
 
-  <!-- Carte -->
   <div id="main">
     <div id="map"></div>
-
-    <!-- Boussole -->
     <div class="compass-container" id="compassContainer" title="Boussole">
       <div class="compass-rose" id="compassRose">
         <div class="compass-north">N</div>
@@ -111,8 +109,6 @@
       </div>
       <div class="compass-degree" id="compassDegree">0°</div>
     </div>
-
-    <!-- Navigation -->
     <div id="navPanel">
       <div id="navIcon">⬆️</div>
       <div id="navInfo">
@@ -122,8 +118,6 @@
       <button id="navStopBtn">✕</button>
     </div>
     <div id="navBottomBar"></div>
-
-    <!-- Bannière arrivée -->
     <div id="arrivalBanner">
       <div id="arrivalText">🏁 Vous êtes arrivé !</div>
       <div class="arrival-row">
@@ -131,17 +125,11 @@
         <button class="arrival-no" id="arrivalNoBtn">Fermer</button>
       </div>
     </div>
-
-    <!-- Bannière itinéraire -->
     <div id="routeBanner">
       <span>🧭 Itinéraire vers <b id="routeDestName"></b> — <span id="routeInfo"></span></span>
       <button id="closeRouteBtn">✕</button>
     </div>
-
-    <!-- Bouton flottant -->
     <button id="fabNearest">🎯 Point le plus proche</button>
-
-    <!-- Légende -->
     <div class="legend">
       <div><b>Statut</b></div>
       <div><span class="dot" style="background:#2ecc71"></span>Vert</div>
@@ -153,10 +141,7 @@
         <span style="opacity:0.5">⬤</span> visité
       </div>
     </div>
-
     <div id="loading">Chargement de la carte…</div>
-
-    <!-- Panneau de tournée optimisée -->
     <div id="tourPanel">
       <div class="tour-handle"></div>
       <div class="tour-header">
@@ -173,12 +158,10 @@
   </div>
 </div>
 
-<!-- Scripts externes -->
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
-<!-- Modules applicatifs (dans l'ordre) -->
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/data.js"></script>
