@@ -1,8 +1,8 @@
 // === Configuration globale de l'application ===
 window.APP_CONFIG = {
-  // --- Supabase (optionnel) ---
-  SUPABASE_URL: "https://YOUR-PROJECT.supabase.co",
-  SUPABASE_ANON_KEY: "YOUR-ANON-KEY",
+  // --- Supabase (authentification requise) ---
+  SUPABASE_URL: "https://xqfdhgrdvsdngfgiuomk.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_8Vyba1dTaQDTx1EuDz9naQ__fvezy3N",
   TABLE_NAME: "census_points",
 
   // --- Carte ---

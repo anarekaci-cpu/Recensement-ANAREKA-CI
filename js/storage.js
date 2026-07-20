@@ -25,31 +25,19 @@ window.Storage = (function () {
 
   async function init() {
     loadLocal();
-    const cfg = window.APP_CONFIG;
-    const configured =
-      cfg.SUPABASE_URL && cfg.SUPABASE_URL.indexOf("YOUR-PROJECT") === -1;
-
-    if (configured && window.supabase) {
-      try {
-        supabase = window.supabase.createClient(
-          cfg.SUPABASE_URL,
-          cfg.SUPABASE_ANON_KEY
-        );
-        const { data, error } = await supabase
-          .from(cfg.TABLE_NAME)
-          .select("*");
-        if (!error && data) {
-          data.forEach((row) => {
-            localState[row.point_id] = row;
-          });
-          saveLocal();
-        }
-        setSyncStatus(true);
-      } catch (e) {
-        console.warn("Supabase indisponible, passage en mode local.", e);
-        setSyncStatus(false);
+    try {
+      supabase = window.Auth.getSupabaseClient();
+      const cfg = window.APP_CONFIG;
+      const { data, error } = await supabase.from(cfg.TABLE_NAME).select("*");
+      if (!error && data) {
+        data.forEach((row) => {
+          localState[row.point_id] = row;
+        });
+        saveLocal();
       }
-    } else {
+      setSyncStatus(true);
+    } catch (e) {
+      console.warn("Supabase indisponible, passage en mode local.", e);
       setSyncStatus(false);
     }
   }

@@ -1,10 +1,23 @@
 // === Point d'entrée de l'application ===
-document.addEventListener("DOMContentLoaded", async () => {
+async function startApp() {
+  document.getElementById("loginScreen").style.display = "none";
+  document.getElementById("app").style.display = "";
+
   await window.Storage.init();
+  await window.DataLoader.loadFromSupabase();
+
   const map = window.MapModule.init();
   window.Navigation.init(map);
   window.Compass.init();
   window.Geolocation.start(map);
+
+  const logoutBtn = document.getElementById("logoutBtn");
+  if (logoutBtn) {
+    logoutBtn.onclick = async () => {
+      await window.Auth.signOut();
+      location.reload();
+    };
+  }
 
   const menuBtn = document.getElementById("menuToggleBtn");
   if (menuBtn) {
@@ -118,4 +131,36 @@ document.addEventListener("DOMContentLoaded", async () => {
     arrivalNoBtn.onclick = () => {
       document.getElementById("arrivalBanner").style.display = "none";
     };
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const session = await window.Auth.getSession();
+  if (session) {
+    startApp();
+    return;
+  }
+
+  const loginBtn = document.getElementById("loginBtn");
+  const emailEl = document.getElementById("loginEmail");
+  const passwordEl = document.getElementById("loginPassword");
+  const errorEl = document.getElementById("loginError");
+
+  async function attemptLogin() {
+    errorEl.textContent = "";
+    loginBtn.disabled = true;
+    loginBtn.textContent = "Connexion…";
+    try {
+      await window.Auth.signIn(emailEl.value.trim(), passwordEl.value);
+      startApp();
+    } catch (e) {
+      errorEl.textContent = "Échec de connexion : email ou mot de passe incorrect.";
+      loginBtn.disabled = false;
+      loginBtn.textContent = "Se connecter";
+    }
+  }
+
+  loginBtn.onclick = attemptLogin;
+  passwordEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") attemptLogin();
+  });
 });
