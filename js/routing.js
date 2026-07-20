@@ -11,7 +11,8 @@
 //     puis 2-opt + Or-opt (même algorithme que votre version actuelle).
 
 window.Routing = (function () {
-  const OSRM_URL = window.APP_CONFIG?.OSRM_URL || 'https://router.project-osrm.org';
+  const OSRM_BASE = window.APP_CONFIG?.OSRM_URL || 'https://router.project-osrm.org';
+  const OSRM_PROXY = window.APP_CONFIG?.OSRM_PROXY || '';
   const R = 6371; // km
 
   function toRad(v) { return (v * Math.PI) / 180; }
@@ -30,6 +31,12 @@ window.Routing = (function () {
     return haversineKm(a.lat, a.lon, b.lat, b.lon);
   }
 
+  // Construction d'URL avec proxy CORS si configuré
+  function osrmUrl(path) {
+    const url = `${OSRM_BASE}/${path}`;
+    return OSRM_PROXY ? `${OSRM_PROXY}${encodeURIComponent(url)}` : url;
+  }
+
   // ================== OSRM (temps réel) ==================
 
   /**
@@ -39,8 +46,9 @@ window.Routing = (function () {
    * @returns {Promise<number[][]|null>} distances en mètres, ou null si indisponible
    */
   async function fetchWalkingMatrix(origin, destinations) {
+    if (!destinations.length) return null;
     const coords = `${origin.lon},${origin.lat};` + destinations.map(d => `${d.lon},${d.lat}`).join(';');
-    const url = `${OSRM_URL}/table/v1/foot/${coords}?annotations=distance`;
+    const url = osrmUrl(`table/v1/foot/${coords}?annotations=distance`);
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error('OSRM indisponible');
@@ -59,7 +67,7 @@ window.Routing = (function () {
    * @returns {Promise<Object|null>} { geometry, distance, duration, steps }
    */
   async function fetchRoute(fromLatLng, toLatLng) {
-    const url = `${OSRM_URL}/route/v1/foot/${fromLatLng[1]},${fromLatLng[0]};${toLatLng[1]},${toLatLng[0]}?overview=full&geometries=geojson&steps=true`;
+    const url = osrmUrl(`route/v1/foot/${fromLatLng[1]},${fromLatLng[0]};${toLatLng[1]},${toLatLng[0]}?overview=full&geometries=geojson&steps=true`);
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) return null;
@@ -221,91 +229,6 @@ window.Routing = (function () {
     return nodes;
   }
 
-  /**
-   * Tournée optimisée (appelée par tour.js et autres).
-   * Désormais, elle accepte en priorité les distances réelles via OSRM.
-   * Si OSRM répond, on exécute l'optimisation sur la matrice réelle.
-   * Sinon, fallback complet en vol d'oiseau (votre algorithme actuel).
-   *
-   * @param {Object} startLatLng - {lat, lng} ou {lat, lon}
-   * @param {Object[]} points - tableau de points avec .lat, .lon
-   * @param {Object} opts - options { timeBudgetMs, maxPoints }
-   * @returns {Promise<Object>} { order, legs, totalKm, etaMin, usedRoadDistance }
-   */
-  async function computeOptimizedTour(startLatLng, points, opts = {}) {
-    const timeBudgetMs = opts.timeBudgetMs || 900;
-    const maxPoints = opts.maxPoints || 25;
-
-    if (!points.length) return { order: [], legs: [], totalKm: 0, etaMin: 0, usedRoadDistance: false };
-
-    const start = { lat: startLatLng.lat, lon: startLatLng.lng ?? startLatLng.lon };
-
-    // Limite le nombre de points à optimiser (comportement actuel)
-    let pointsToOptimize = points;
-    if (points.length > maxPoints) {
-      const withDist = points.map(p => ({ point: p, dist: pointDist(start, p) }));
-      withDist.sort((a, b) => a.dist - b.dist);
-      pointsToOptimize = withDist.slice(0, maxPoints).map(d => d.point);
-    }
-
-    // Essaie d'obtenir la matrice réelle
-    const matrix = await fetchWalkingMatrix(start, pointsToOptimize);
-    let order;
-    let usedRoadDistance = false;
-
-    if (matrix && matrix[0]) {
-      // Utilise les distances réelles pour l'optimisation
-      const pointsCopy = pointsToOptimize.slice();
-      // Construit un tableau de distances réelles entre points
-      // La matrice de OSRM contient les distances depuis start (ligne 0) et entre chaque point.
-      // On peut alimenter un cache de distance réelle pour les appels pointDist utilisés par 2-opt/Or-opt.
-      // Pour conserver les algorithmes existants, on crée une version de pointDist qui utilise la matrice.
-      const realDist = (a, b) => {
-        // a, b : objets avec lat/lon (ou index)
-        const idxA = a === start ? -1 : pointsCopy.indexOf(a);
-        const idxB = b === start ? -1 : pointsCopy.indexOf(b);
-        if (idxA === -1 && idxB === -1) return pointDist(a, b); // fallback
-        const row = idxA === -1 ? 0 : idxA + 1;
-        const col = idxB === -1 ? 0 : idxB + 1;
-        if (row < matrix.length && col < matrix[0].length && matrix[row][col] != null) {
-          return matrix[row][col] / 1000; // m -> km
-        }
-        return pointDist(a, b);
-      };
-
-      // Remplace temporairement pointDist pour l'optimisation
-      const origPointDist = pointDist;
-      // On ne peut pas modifier pointDist directement car c'est une fonction constante, on va plutôt faire tourner les algos avec la matrice.
-      // On va réécrire les fonctions d'optimisation pour utiliser realDist. Cela rend le code plus propre.
-      // Pour rester rétrocompatible, on va injecter la matrice dans les fonctions.
-      order = nearestNeighborOrderWithDist(start, pointsToOptimize, realDist);
-      const deadline = Date.now() + timeBudgetMs;
-      order = twoOptWithDist(start, order, realDist, deadline);
-      order = orOptWithDist(start, order, realDist, Date.now() + Math.min(300, Math.max(0, deadline - Date.now())));
-      usedRoadDistance = true;
-    } else {
-      // Fallback vol d'oiseau (comportement d'origine)
-      order = nearestNeighborOrder(start, pointsToOptimize);
-      const deadline = Date.now() + timeBudgetMs;
-      order = twoOpt(start, order, deadline);
-      order = orOpt(start, order, Date.now() + Math.min(300, Math.max(0, deadline - Date.now())));
-    }
-
-    // Construction des legs
-    const legs = [];
-    let prev = start;
-    let totalKm = 0;
-    order.forEach(p => {
-      const d = usedRoadDistance ? realDist(prev, p) : pointDist(prev, p);
-      totalKm += d;
-      legs.push({ point: p, distKm: d });
-      prev = p;
-    });
-    const etaMin = Math.round((totalKm / 4.2) * 60);
-
-    return { order, legs, totalKm, etaMin, usedRoadDistance };
-  }
-
   // Versions des algos avec fonction de distance personnalisée
   function nearestNeighborOrderWithDist(start, points, distFunc) {
     const remaining = points.slice();
@@ -386,15 +309,102 @@ window.Routing = (function () {
     return nodes;
   }
 
+  /**
+   * Tournée optimisée (appelée par tour.js et autres).
+   * Désormais, elle accepte en priorité les distances réelles via OSRM.
+   * Si OSRM répond, on exécute l'optimisation sur la matrice réelle.
+   * Sinon, fallback complet en vol d'oiseau (votre algorithme actuel).
+   *
+   * @param {Object} startLatLng - {lat, lng} ou {lat, lon}
+   * @param {Object[]} points - tableau de points avec .lat, .lon
+   * @param {Object} opts - options { timeBudgetMs, maxPoints }
+   * @returns {Promise<Object>} { order, legs, totalKm, etaMin, usedRoadDistance }
+   */
+  async function computeOptimizedTour(startLatLng, points, opts = {}) {
+    const timeBudgetMs = opts.timeBudgetMs || 900;
+    const maxPoints = opts.maxPoints || 25;
+
+    if (!points.length) return { order: [], legs: [], totalKm: 0, etaMin: 0, usedRoadDistance: false };
+
+    const start = { lat: startLatLng.lat, lon: startLatLng.lng ?? startLatLng.lon };
+
+    // Limite le nombre de points à optimiser (comportement actuel)
+    let pointsToOptimize = points;
+    if (points.length > maxPoints) {
+      const withDist = points.map(p => ({ point: p, dist: pointDist(start, p) }));
+      withDist.sort((a, b) => a.dist - b.dist);
+      pointsToOptimize = withDist.slice(0, maxPoints).map(d => d.point);
+    }
+
+    // Essaie d'obtenir la matrice réelle
+    const matrix = await fetchWalkingMatrix(start, pointsToOptimize);
+    let order;
+    let usedRoadDistance = false;
+
+    if (matrix && matrix[0]) {
+      // Utilise les distances réelles pour l'optimisation
+      const pointsCopy = pointsToOptimize.slice();
+      const realDist = (a, b) => {
+        const idxA = a === start ? -1 : pointsCopy.indexOf(a);
+        const idxB = b === start ? -1 : pointsCopy.indexOf(b);
+        if (idxA === -1 && idxB === -1) return pointDist(a, b);
+        const row = idxA === -1 ? 0 : idxA + 1;
+        const col = idxB === -1 ? 0 : idxB + 1;
+        if (row < matrix.length && col < matrix[0].length && matrix[row][col] != null) {
+          return matrix[row][col] / 1000; // m -> km
+        }
+        return pointDist(a, b);
+      };
+
+      order = nearestNeighborOrderWithDist(start, pointsToOptimize, realDist);
+      const deadline = Date.now() + timeBudgetMs;
+      order = twoOptWithDist(start, order, realDist, deadline);
+      order = orOptWithDist(start, order, realDist, Date.now() + Math.min(300, Math.max(0, deadline - Date.now())));
+      usedRoadDistance = true;
+    } else {
+      // Fallback vol d'oiseau (comportement d'origine)
+      order = nearestNeighborOrder(start, pointsToOptimize);
+      const deadline = Date.now() + timeBudgetMs;
+      order = twoOpt(start, order, deadline);
+      order = orOpt(start, order, Date.now() + Math.min(300, Math.max(0, deadline - Date.now())));
+    }
+
+    // Construction des legs
+    const legs = [];
+    let prev = start;
+    let totalKm = 0;
+    const distFunc = usedRoadDistance ? (a, b) => {
+      const idxA = a === start ? -1 : pointsToOptimize.indexOf(a);
+      const idxB = b === start ? -1 : pointsToOptimize.indexOf(b);
+      if (idxA === -1 && idxB === -1) return pointDist(a, b);
+      const row = idxA === -1 ? 0 : idxA + 1;
+      const col = idxB === -1 ? 0 : idxB + 1;
+      if (row < matrix.length && col < matrix[0].length && matrix[row][col] != null) {
+        return matrix[row][col] / 1000;
+      }
+      return pointDist(a, b);
+    } : pointDist;
+
+    order.forEach(p => {
+      const d = distFunc(prev, p);
+      totalKm += d;
+      legs.push({ point: p, distKm: d });
+      prev = p;
+    });
+    const etaMin = Math.round((totalKm / 4.2) * 60);
+
+    return { order, legs, totalKm, etaMin, usedRoadDistance };
+  }
+
   // Exposition publique
   return {
     haversineKm,
     pointDist,
     tourLength,
-    fetchWalkingMatrix,    // pour geolocation.js
-    fetchRoute,            // pour navigation.js / tracé
-    fetchRoadLeg: fetchRoute, // alias pour tour.js existant
-    findTrueNearest,       // pour geolocation.js (bouton "Plus proche")
-    computeOptimizedTour   // mise à jour
+    fetchWalkingMatrix,
+    fetchRoute,
+    fetchRoadLeg: fetchRoute,
+    findTrueNearest,
+    computeOptimizedTour
   };
 })();
